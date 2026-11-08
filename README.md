@@ -11,8 +11,7 @@ Three commands, one rewrite method:
 ```
 /better <prompt>            helper (separate run, read-only) ─► rewrite ─► sent as your message right away
 /better-prompt <prompt>     helper (separate run, read-only) ─► rewrite ─► box: you fire, tweak, edit, … or cancel
-/better-boomerang <prompt>  this chat rewrites it inside a /boomerang run ─► run folds into a summary
-                                                                          ─► rewrite sent as your message
+/better-boomerang <prompt>  this chat rewrites it ─► jumps back to where it started ─► rewrite sent as your message
 ```
 
 Leave the prompt out of any of them to deepen the task you're working on now, including any feedback you gave on work so far.
@@ -23,7 +22,7 @@ Leave the prompt out of any of them to deepen the task you're working on now, in
 pi install /Users/nicobailon/.pi/agent/skills/pi-better
 ```
 
-`/better` and `/better-prompt` need [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `/better-boomerang` and the `b` key show only when [pi-boomerang](https://github.com/nicobailon/pi-boomerang) is loaded.
+`/better` and `/better-prompt` need [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `/better-boomerang` needs no other extension. The `b` key in the box shows only when [pi-boomerang](https://github.com/nicobailon/pi-boomerang) is loaded.
 
 ## Use
 
@@ -55,11 +54,9 @@ The same helper, but the improved prompt shows in a box first, with the reasonin
 | `w` | Shows or hides the four answers behind the rewrite. |
 | Esc | Closes the box; nothing is sent. |
 
-### `/better-boomerang`: rewrite here, folded away
+### `/better-boomerang`: rewrite here, then jump back
 
-No helper: the agent in this chat does the rewrite itself, inside a `/boomerang` run. It can read and run commands like any turn here, but it's told only to read and rewrite. When it finishes, pi-boomerang folds the run into a summary, and the improved prompt (the block it ended its reply with) goes out as your message. If the block is missing, nothing is sent and you get an error.
-
-pi-boomerang then adds its own follow-up turn about the summary. That turn runs after the improved prompt, so it usually ends with a one-line "nothing left to do" note.
+No helper: the agent in this chat does the rewrite itself, with everything it already knows. It can read and run commands like any turn here, but it's told only to read and rewrite, and to end with the prompt in a marked block. Then pi-better jumps the chat back to where the rewrite started (no summary), and sends the improved prompt as your message. The rewrite turn leaves the chat's context but stays in `/tree`. If the block is missing, nothing is sent, you get an error, and the rewrite stays in the chat so you can see what happened.
 
 ## How it works
 
@@ -69,20 +66,21 @@ pi-boomerang then adds its own follow-up turn about the summary. That turn runs 
           │                    │                            │
           ▼                    ▼                            ▼
 ┌─ helper (/better and /better-prompt) ──────────┐   ┌─ this chat (/better-boomerang) ───────────┐
-│ pi-better-helper, registered once per session  │   │ pi-better starts "/boomerang <task>":     │
-│ tools: read · grep · find · ls · bash          │   │ the agent here reads, answers (1)–(4),    │
-│ (no edit, no write)                            │   │ and ends its reply with the prompt in an  │
-│ copy of this chat if the session is saved,     │   │ <improved-prompt> block                   │
-│ else a fresh start                             │   │ pi-boomerang folds the run into a summary │
-│ reads the real material, answers (1)–(4),      │   └──────────────────┬────────────────────────┘
-│ returns a fixed schema                         │                      │ block missing → error,
-└────────┬──────────────────────┬────────────────┘                      │ nothing sent
+│ pi-better-helper, registered once per session  │   │ a hidden message asks the agent here to   │
+│ tools: read · grep · find · ls · bash          │   │ read, answer (1)–(4), and end its reply   │
+│ (no edit, no write)                            │   │ with the prompt in an <improved-prompt>   │
+│ copy of this chat if the session is saved,     │   │ block                                     │
+│ else a fresh start                             │   │ then the chat jumps back to where it      │
+│ reads the real material, answers (1)–(4),      │   │ started; the rewrite stays in /tree       │
+│ returns a fixed schema                         │   └──────────────────┬────────────────────────┘
+└────────┬──────────────────────┬────────────────┘                      │ block missing → error,
+         │                      │                                       │ nothing sent
          │ bad shape → error,   │                                       │
          │ nothing sent         │                                       │
          ▼                      ▼                                       ▼
-  /better                /better-prompt                           sent as your message,
-  "sending the           box: Enter fire · b /boomerang ·         before pi-boomerang's own
-  improved prompt"       s subagent · t tweak · e edit ·          follow-up turn
+  /better                /better-prompt                           "sending the improved
+  "sending the           box: Enter fire · b /boomerang ·         prompt" → sent as your
+  improved prompt"       s subagent · t tweak · e edit ·          message; nothing after it
   → sent as your         w why · Esc cancel
   message
 ```
@@ -112,7 +110,7 @@ chat after    [ … earlier messages … ] + your one message
               the helper's work and your tweaks stay outside the chat
 ```
 
-`/better-boomerang` does its rewrite in this chat, then pi-boomerang replaces that work with a summary, which rewrites recent history once.
+`/better-boomerang` does its rewrite in this chat, then jumps back, so the chat's context afterwards is the same as with the other two: earlier messages plus your one message. The rewrite turn itself was one extra turn on top of the cached history.
 
 Outside the interactive terminal (print, JSON or RPC mode), `/better-prompt` posts the answers and the prompt as a message and stops; `/better` still sends the prompt.
 
@@ -121,7 +119,6 @@ Outside the interactive terminal (print, JSON or RPC mode), `/better-prompt` pos
 - The helper can't ask you questions while it works; you're waiting on it, so it decides from what it can read.
 - The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; `helper.md` tells it not to.
 - In a new session with no history yet, there's nothing to fork: each command needs a prompt, and `s` offers only Fresh.
-- `/better-boomerang` turns `->` in your prompt into `→`, because /boomerang reads `->` as its own chain syntax, and refuses a prompt with a `--`, `--rethrow` or `--loop` word.
 - `b` is hidden when the prompt starts with `/` or a /boomerang subcommand word, or contains `->`, `--`, `--rethrow` or `--loop`, because /boomerang would read those as its own syntax.
 - A very long prompt makes a tall box; edit it with `e` if it doesn't fit your screen.
 

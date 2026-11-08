@@ -277,11 +277,7 @@ export default function (pi: ExtensionAPI) {
 	let helperRegistration: { dispose(): void } | undefined;
 	// Aborted at session shutdown so a pending subagent launch stops before it can touch the stale context.
 	let session = new AbortController();
-	let boomerangCommandRegistered = false;
-	// A /better-boomerang run in progress: the entry boomerang collapses back to, and its last reply so far.
-	let inline: { prompt: string; startLeafId: string | null; reply?: string } | undefined;
-	// The improved prompt sent after a /better-boomerang run, recorded once its turn starts.
-	let toRecord: { prompt: string; improved: string } | undefined;
+	let inlineRunning = false;
 
 	/** The prompt and whether the helper can get a copy of this conversation, or undefined after telling the user why not. */
 	const prepare = (command: string, args: string, ctx: ExtensionCommandContext) => {
@@ -298,18 +294,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", () => {
 		session = new AbortController();
-		// Commands from every extension exist by now, so this is where pi-boomerang can be detected.
-		if (!boomerangCommandRegistered && pi.getCommands().some((command) => command.name === "boomerang")) {
-			boomerangCommandRegistered = true;
-			registerBetterBoomerang();
-		}
 	});
 	pi.on("session_shutdown", () => {
 		session.abort();
 		helperRegistration?.dispose();
 		helperRegistration = undefined;
-		inline = undefined;
-		toRecord = undefined;
 	});
 
 	pi.registerCommand("better-prompt", {
@@ -422,58 +411,60 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	const registerBetterBoomerang = () =>
-		pi.registerCommand("better-boomerang", {
-			description: "Deepen a prompt (or the current task) right here inside a /boomerang run, then send the improved prompt once it folds up",
-			getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
-			handler: async (args, ctx) => {
-				const prompt = args.trim();
-				if (!prompt && ctx.sessionManager.getBranch().length === 0) {
-					ctx.ui.notify("/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>", "error");
-					return;
+	pi.registerCommand("better-boomerang", {
+		description: "Deepen a prompt (or the current task) right here, then jump back and send the improved prompt as if you typed it",
+		getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
+		handler: async (args, ctx) => {
+			const prompt = args.trim();
+			if (!prompt && ctx.sessionManager.getBranch().length === 0) {
+				ctx.ui.notify("/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>", "error");
+				return;
+			}
+			if (inlineRunning) {
+				ctx.ui.notify("/better-boomerang is already running; wait for it to finish.", "error");
+				return;
+			}
+			inlineRunning = true;
+			try {
+				await ctx.waitForIdle();
+				// navigateTree to a user or custom message moves to its parent and refills the input box with its text,
+				// so the branch point must be another kind of entry; add an invisible one when the leaf isn't.
+				const leaf = ctx.sessionManager.getLeafEntry();
+				if (!leaf || (leaf.type === "message" && leaf.message.role === "user") || leaf.type === "custom_message") {
+					pi.appendEntry("better-boomerang-start", { prompt });
 				}
-				if (inline) {
-					ctx.ui.notify("/better-boomerang is already running; wait for it to finish.", "error");
-					return;
+				const branchPoint = ctx.sessionManager.getLeafId()!;
+
+				// Hidden from the chat but sent to the model; it starts a turn right away, so waitForIdle waits for it.
+				pi.sendMessage(
+					{ customType: "better-boomerang", content: buildHelperTask({ helper: helper(), prompt, returns: "marked" }), display: false },
+					{ triggerTurn: true },
+				);
+				await ctx.waitForIdle();
+
+				const branch = ctx.sessionManager.getBranch();
+				const rewrite = branch.slice(branch.findIndex((entry) => entry.id === branchPoint) + 1);
+				let improved: string;
+				try {
+					const replies = rewrite.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+					improved = parseMarkedPrompt(lastAssistantText(replies) ?? "");
+				} catch (error) {
+					// The rewrite stays on the branch so the user can see what went wrong.
+					return failed(ctx, "better-boomerang", error);
 				}
-				if (!ctx.isIdle()) await ctx.waitForIdle();
-				// /boomerang reads `->` as chain syntax and a few other tokens as its own flags.
-				const task = buildHelperTask({ helper: helper(), prompt, returns: "marked" }).replaceAll("->", "→");
-				if (!boomerangSafe(task)) {
-					return failed(ctx, "better-boomerang", new Error("the prompt contains `--`, `--rethrow` or `--loop`, which /boomerang would read as its own flags"));
+
+				// No summary: the rewrite leaves the active context and stays reachable in /tree.
+				const navigated = await ctx.navigateTree(branchPoint, { summarize: false });
+				if (navigated.cancelled) {
+					return failed(ctx, "better-boomerang", new Error("another extension cancelled the jump back to where the rewrite started"));
 				}
-				// pi-boomerang collapses the run back to the entry that is the leaf when it starts.
-				inline = { prompt, startLeafId: ctx.sessionManager.getLeafId() };
-				pi.sendUserMessage(`/boomerang ${task}`, { expandPromptTemplates: true });
-			},
-		});
-
-	pi.on("agent_end", (event) => {
-		if (!inline) return;
-		const reply = lastAssistantText(event.messages);
-		if (reply) inline.reply = reply;
-	});
-
-	// pi-boomerang folds its run up with navigateTree inside agent_settled. A prompt sent from here is held until
-	// those handlers return and runs before pi-boomerang's own follow-up, so the improved prompt is what runs next.
-	pi.on("session_tree", (event, ctx) => {
-		if (!inline || !event.summaryEntry || event.summaryEntry.parentId !== inline.startLeafId) return;
-		const run = inline;
-		inline = undefined;
-		let improved: string;
-		try {
-			improved = parseMarkedPrompt(run.reply ?? "");
-		} catch (error) {
-			return failed(ctx, "better-boomerang", error);
-		}
-		toRecord = { prompt: run.prompt, improved };
-		ctx.ui.notify("/better-boomerang: sending the improved prompt", "info");
-		pi.sendUserMessage(improved);
-	});
-
-	pi.on("before_agent_start", (event) => {
-		if (!toRecord || event.messageType !== "user" || event.prompt !== toRecord.improved) return;
-		pi.appendEntry("better", { prompt: toRecord.prompt, inline: true, improved: toRecord.improved });
-		toRecord = undefined;
+				pi.appendEntry("better", { prompt, inline: true, improved });
+				ctx.ui.notify("/better-boomerang: sending the improved prompt", "info");
+				// navigateTree keeps the same session, so this ctx and pi stay valid.
+				pi.sendUserMessage(improved);
+			} finally {
+				inlineRunning = false;
+			}
+		},
 	});
 }
