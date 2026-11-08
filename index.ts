@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Key, Markdown, Spacer, Text, matchesKey, type TUI } from "@earendil-works/pi-tui";
@@ -12,10 +12,20 @@ const UPDATE_EVENT = "prompt-template:subagent:update";
 const RESPONSE_EVENT = "prompt-template:subagent:response";
 const CANCEL_EVENT = "prompt-template:subagent:cancel";
 
-// The oracle agent is read-only (no edit or write tools) and starts from a fork of this conversation.
-const HELPER_AGENT = "oracle";
+// pi-subagents runs this request as a foreground child, which can't load extension tools; delegate lists none.
+// It has edit and write, so helper.md is what keeps it read-only.
+const HELPER_AGENT = "delegate";
 const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
+
+// pi-subagents' RPC bridge (pi-subagents src/extension/rpc.ts). Its spawn runs detached (async), and the
+// run's result comes back into the chat the normal pi-subagents way.
+const RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+const RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+const SUBAGENT_AGENT = "worker";
+const SUBAGENT_MODEL = "pi-claude/claude-opus-5-5:high";
+const FORKED = "Forked: gets a copy of this conversation";
+const FRESH = "Fresh: starts with an empty context";
 
 interface Progress {
 	toolCount?: number;
@@ -23,11 +33,18 @@ interface Progress {
 	durationMs?: number;
 }
 
-type Choice = "fire" | "boomerang" | "tweak" | "edit" | "cancel";
+type Choice = "fire" | "boomerang" | "subagent" | "tweak" | "edit" | "cancel";
+
+type Context = "fork" | "fresh";
+
+interface Offers {
+	boomerang: boolean;
+	subagent: boolean;
+}
 
 class Cancelled extends Error {}
 
-function askHelper(pi: ExtensionAPI, cwd: string, task: string, signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<BetterResult> {
+function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context, signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<BetterResult> {
 	const requestId = randomUUID();
 	const identity = { requestId, ownerRunId: requestId, nodeId: "better" };
 	return new Promise((resolve, reject) => {
@@ -68,7 +85,7 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, signal: AbortSig
 			...identity,
 			agent: HELPER_AGENT,
 			task,
-			context: "fork",
+			context,
 			cwd,
 			model: HELPER_MODEL,
 			thinking: "high",
@@ -82,6 +99,29 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, signal: AbortSig
 	});
 }
 
+function spawnSubagent(pi: ExtensionAPI, cwd: string, task: string, context: Context): Promise<void> {
+	const requestId = randomUUID();
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			off();
+			reject(new Error("pi-subagents didn't answer the launch within 30s."));
+		}, 30_000);
+		const off = pi.events.on(RPC_REPLY_EVENT_PREFIX + requestId, (reply: any) => {
+			clearTimeout(timer);
+			off();
+			if (reply?.success) resolve();
+			else reject(new Error(reply?.error?.message ?? "unknown error"));
+		});
+		pi.events.emit(RPC_REQUEST_EVENT, {
+			version: 1,
+			requestId,
+			method: "spawn",
+			source: { extension: "pi-better" },
+			params: { agent: SUBAGENT_AGENT, task, context, model: SUBAGENT_MODEL, cwd },
+		});
+	});
+}
+
 function progressText(progress: Progress): string {
 	const parts = ["Helper is reading and rewriting"];
 	if (progress.toolCount) parts.push(`${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}`);
@@ -90,9 +130,9 @@ function progressText(progress: Progress): string {
 	return `${parts.join(" · ")} · Esc cancels`;
 }
 
-async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: string): Promise<BetterResult | undefined> {
+async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: string, context: Context): Promise<BetterResult | undefined> {
 	if (ctx.mode !== "tui") {
-		return await askHelper(pi, ctx.cwd, task, new AbortController().signal, () => {});
+		return await askHelper(pi, ctx.cwd, task, context, new AbortController().signal, () => {});
 	}
 	const outcome = await ctx.ui.custom<{ result?: BetterResult; error?: unknown }>((tui, theme, _keybindings, done) => {
 		const loader = new CancellableLoader(tui, (s) => theme.fg("accent", s), (s) => theme.fg("muted", s), progressText({}));
@@ -100,7 +140,7 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
 		box.addChild(loader);
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
-		askHelper(pi, ctx.cwd, task, loader.signal, (progress) => loader.setMessage(progressText(progress))).then(
+		askHelper(pi, ctx.cwd, task, context, loader.signal, (progress) => loader.setMessage(progressText(progress))).then(
 			(result) => done({ result }),
 			(error) => done(error instanceof Cancelled ? {} : { error }),
 		);
@@ -115,7 +155,7 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 	return outcome.result;
 }
 
-function resultBox(tui: TUI, theme: Theme, result: BetterResult, canBoomerang: boolean, done: (choice: Choice) => void) {
+function resultBox(tui: TUI, theme: Theme, result: BetterResult, offers: Offers, done: (choice: Choice) => void) {
 	let showWhy = false;
 	const box = new Container();
 	const build = () => {
@@ -137,7 +177,15 @@ function resultBox(tui: TUI, theme: Theme, result: BetterResult, canBoomerang: b
 		box.addChild(new Spacer(1));
 		box.addChild(new Markdown(result.prompt, 1, 0, getMarkdownTheme()));
 		box.addChild(new Spacer(1));
-		const keys = ["Enter fire", ...(canBoomerang ? ["b fire as /boomerang"] : []), "t tweak", "e edit", `w ${showWhy ? "hide" : "show"} why`, "Esc cancel"];
+		const keys = [
+			"Enter fire",
+			...(offers.boomerang ? ["b fire as /boomerang"] : []),
+			...(offers.subagent ? ["s run as a subagent"] : []),
+			"t tweak",
+			"e edit",
+			`w ${showWhy ? "hide" : "show"} why`,
+			"Esc cancel",
+		];
 		box.addChild(new Text(theme.fg("dim", keys.join(" · ")), 1, 0));
 		box.addChild(new DynamicBorder(border));
 	};
@@ -147,7 +195,8 @@ function resultBox(tui: TUI, theme: Theme, result: BetterResult, canBoomerang: b
 		invalidate: () => box.invalidate(),
 		handleInput(data: string) {
 			if (matchesKey(data, Key.enter)) done("fire");
-			else if (canBoomerang && matchesKey(data, "b")) done("boomerang");
+			else if (offers.boomerang && matchesKey(data, "b")) done("boomerang");
+			else if (offers.subagent && matchesKey(data, "s")) done("subagent");
 			else if (matchesKey(data, "t")) done("tweak");
 			else if (matchesKey(data, "e")) done("edit");
 			else if (matchesKey(data, Key.escape)) done("cancel");
@@ -172,15 +221,22 @@ function plainText(result: BetterResult): string {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("better", {
-		description: "Deepen a prompt (or the current task) with a forked helper, then fire, tweak, edit or cancel it",
+		description: "Deepen a prompt (or the current task) with a helper, then fire, tweak, edit, run as a subagent, or cancel it",
 		handler: async (args, ctx) => {
 			const helper = readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 			const prompt = args.trim();
+			// A fork needs the session file, which Pi writes only once the conversation has history.
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			const canFork = sessionFile !== undefined && existsSync(sessionFile);
+			if (!prompt && !canFork) {
+				ctx.ui.notify("/better has no task to deepen yet; give it a prompt: /better <prompt>", "error");
+				return;
+			}
 			let tweak: { previous: BetterResult; note: string } | undefined;
 			for (;;) {
 				let result: BetterResult | undefined;
 				try {
-					result = await runHelper(pi, ctx, buildHelperTask({ helper, prompt, tweak }));
+					result = await runHelper(pi, ctx, buildHelperTask({ helper, prompt, tweak }), canFork ? "fork" : "fresh");
 				} catch (error) {
 					const message = `/better failed: ${error instanceof Error ? error.message : String(error)}`;
 					if (ctx.hasUI) ctx.ui.notify(message, "error");
@@ -197,13 +253,33 @@ export default function (pi: ExtensionAPI) {
 					pi.sendMessage({ customType: "better", content: plainText(result), display: true, details: result });
 					return;
 				}
-				const canBoomerang = pi.getCommands().some((command) => command.name === "boomerang") && boomerangSafe(result.prompt);
 				const shown = result;
-				const choice = await ctx.ui.custom<Choice>((tui, theme, _keybindings, done) => resultBox(tui, theme, shown, canBoomerang, done), {
-					blocked: { kind: "question", message: "Fire, tweak, edit or cancel the improved prompt" },
-				});
+				const offers: Offers = {
+					boomerang: pi.getCommands().some((command) => command.name === "boomerang") && boomerangSafe(result.prompt),
+					subagent: pi.getAllTools().some((tool) => tool.name === "subagent"),
+				};
+				let choice: Choice;
+				let context: Context | undefined;
+				do {
+					choice = await ctx.ui.custom<Choice>((tui, theme, _keybindings, done) => resultBox(tui, theme, shown, offers, done), {
+						blocked: { kind: "question", message: "Fire, tweak, edit or cancel the improved prompt" },
+					});
+					if (choice === "subagent") {
+						const picked = await ctx.ui.select("Run the improved prompt as a subagent", canFork ? [FORKED, FRESH] : [FRESH]);
+						context = picked === FORKED ? "fork" : picked === FRESH ? "fresh" : undefined;
+					}
+				} while (choice === "subagent" && !context);
 				if (choice === "cancel") {
 					ctx.ui.notify("/better cancelled; nothing was sent", "info");
+					return;
+				}
+				if (choice === "subagent" && context) {
+					try {
+						await spawnSubagent(pi, ctx.cwd, result.prompt, context);
+						ctx.ui.notify(`Started a ${context === "fork" ? "forked" : "fresh"} ${SUBAGENT_AGENT} subagent; its result comes back here when it finishes.`, "info");
+					} catch (error) {
+						ctx.ui.notify(`/better couldn't start the subagent: ${error instanceof Error ? error.message : String(error)}`, "error");
+					}
 					return;
 				}
 				if (choice === "tweak") {
@@ -219,6 +295,8 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (choice === "edit" || choice === "tweak") {
 					ctx.ui.setEditorText(result.prompt);
+					// setEditorText doesn't repaint on its own; the notice does, so the prompt shows right away.
+					ctx.ui.notify("The improved prompt is in your input box. Edit it, then press Enter to send.", "info");
 					return;
 				}
 				if (!ctx.isIdle()) await ctx.waitForIdle();
