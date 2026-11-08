@@ -3,7 +3,7 @@ I want a deeper version of this task/plan request, not a bigger one. Before rewr
 ## What "this task" is
 
 - If a prompt is given below under "Prompt to deepen", that text is the request to deepen.
-- If no prompt is given, deepen the task currently in progress in the conversation you were forked from. Include any feedback the user gave on work already done ("not good enough", "too shallow"); it is part of the task.
+- If no prompt is given, deepen the task currently in progress in the conversation so far. Include any feedback the user gave on work already done ("not good enough", "too shallow"); it is part of the task.
 
 ## How to work
 
@@ -12,13 +12,3 @@ I want a deeper version of this task/plan request, not a bigger one. Before rewr
 3. Rewrite the prompt so it asks for exactly that: the deeper version, not a bigger one. Keep the user's goal and voice, put the concrete facts in, and say what proves the result is right. Write it as the user's own request, ready to send as is.
 
 Never carry the prompt out. Don't edit files, start work, or launch anything; you only read and rewrite.
-
-## Return
-
-Finish by calling `structured_output` with:
-
-- `professional`: answer (1)
-- `rawMaterial`: answer (2)
-- `methods`: answer (3)
-- `proof`: answer (4)
-- `prompt`: the rewritten prompt, complete, as plain text or Markdown, with no preamble such as "Here is the prompt"

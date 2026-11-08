@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Key, Markdown, Spacer, Text, matchesKey, type TUI } from "@earendil-works/pi-tui";
-import { type BetterResult, RESULT_SCHEMA, boomerangSafe, buildHelperTask, parseBetterResult } from "./better.ts";
+import { type BetterResult, RESULT_SCHEMA, boomerangSafe, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
 
 // pi-subagents' structured delegation events (pi-subagents src/api/delegation.ts).
 const REQUEST_EVENT = "prompt-template:subagent:request";
@@ -252,52 +252,88 @@ function plainText(result: BetterResult): string {
 	].join("\n\n");
 }
 
+function promptCompletions(description: string) {
+	return (prefix: string) => (prefix.trim() ? null : [{ value: "", label: "<prompt>", description }]);
+}
+
+function lastAssistantText(messages: readonly unknown[]): string | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as { role?: string; content?: unknown };
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		const text = message.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n").trim();
+		if (text) return text;
+	}
+	return undefined;
+}
+
+function failed(ctx: ExtensionContext, command: string, error: unknown): void {
+	const message = `/${command} failed: ${error instanceof Error ? error.message : String(error)}. Nothing was sent.`;
+	if (!ctx.hasUI) throw new Error(message);
+	ctx.ui.notify(message, "error");
+}
+
 export default function (pi: ExtensionAPI) {
+	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 	let helperRegistration: { dispose(): void } | undefined;
 	// Aborted at session shutdown so a pending subagent launch stops before it can touch the stale context.
 	let session = new AbortController();
+	let boomerangCommandRegistered = false;
+	// A /better-boomerang run in progress: the entry boomerang collapses back to, and its last reply so far.
+	let inline: { prompt: string; startLeafId: string | null; reply?: string } | undefined;
+	// The improved prompt sent after a /better-boomerang run, recorded once its turn starts.
+	let toRecord: { prompt: string; improved: string } | undefined;
+
+	/** The prompt and whether the helper can get a copy of this conversation, or undefined after telling the user why not. */
+	const prepare = (command: string, args: string, ctx: ExtensionCommandContext) => {
+		const prompt = args.trim();
+		// A fork needs the session file, which Pi writes only once the conversation has history.
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		const canFork = sessionFile !== undefined && existsSync(sessionFile);
+		if (!prompt && !canFork) {
+			ctx.ui.notify(`/${command} has no task to deepen yet; give it a prompt: /${command} <prompt>`, "error");
+			return undefined;
+		}
+		return { prompt, canFork };
+	};
+
 	pi.on("session_start", () => {
 		session = new AbortController();
+		// Commands from every extension exist by now, so this is where pi-boomerang can be detected.
+		if (!boomerangCommandRegistered && pi.getCommands().some((command) => command.name === "boomerang")) {
+			boomerangCommandRegistered = true;
+			registerBetterBoomerang();
+		}
 	});
 	pi.on("session_shutdown", () => {
 		session.abort();
 		helperRegistration?.dispose();
 		helperRegistration = undefined;
+		inline = undefined;
+		toRecord = undefined;
 	});
 
-	pi.registerCommand("better", {
-		description: "Deepen a prompt (or the current task) with a helper, then fire, tweak, edit, run as a subagent, or cancel it",
+	pi.registerCommand("better-prompt", {
+		description: "Deepen a prompt (or the current task) with a read-only helper, then fire, tweak, edit, run as a subagent, or cancel it",
+		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
 		handler: async (args, ctx) => {
-			const helper = readFileSync(new URL("./helper.md", import.meta.url), "utf8");
-			const prompt = args.trim();
-			// A fork needs the session file, which Pi writes only once the conversation has history.
-			const sessionFile = ctx.sessionManager.getSessionFile();
-			const canFork = sessionFile !== undefined && existsSync(sessionFile);
-			if (!prompt && !canFork) {
-				ctx.ui.notify("/better has no task to deepen yet; give it a prompt: /better <prompt>", "error");
-				return;
-			}
+			const prepared = prepare("better-prompt", args, ctx);
+			if (!prepared) return;
+			const { prompt, canFork } = prepared;
 			try {
 				helperRegistration ??= registerHelper(pi);
 			} catch (error) {
-				const message = `/better failed: ${error instanceof Error ? error.message : String(error)}`;
-				if (ctx.hasUI) ctx.ui.notify(message, "error");
-				else throw new Error(message);
-				return;
+				return failed(ctx, "better-prompt", error);
 			}
 			let tweak: { previous: BetterResult; note: string } | undefined;
 			for (;;) {
 				let result: BetterResult | undefined;
 				try {
-					result = await runHelper(pi, ctx, buildHelperTask({ helper, prompt, tweak }), canFork ? "fork" : "fresh");
+					result = await runHelper(pi, ctx, buildHelperTask({ helper: helper(), prompt, returns: "structured", tweak }), canFork ? "fork" : "fresh");
 				} catch (error) {
-					const message = `/better failed: ${error instanceof Error ? error.message : String(error)}`;
-					if (ctx.hasUI) ctx.ui.notify(message, "error");
-					else throw new Error(message);
-					return;
+					return failed(ctx, "better-prompt", error);
 				}
 				if (!result) {
-					ctx.ui.notify("/better cancelled", "info");
+					ctx.ui.notify("/better-prompt cancelled", "info");
 					return;
 				}
 				pi.appendEntry("better", { prompt, tweakNote: tweak?.note, result });
@@ -323,7 +359,7 @@ export default function (pi: ExtensionAPI) {
 					}
 				} while (choice === "subagent" && !context);
 				if (choice === "cancel") {
-					ctx.ui.notify("/better cancelled; nothing was sent", "info");
+					ctx.ui.notify("/better-prompt cancelled; nothing was sent", "info");
 					return;
 				}
 				if (choice === "subagent" && context) {
@@ -332,14 +368,14 @@ export default function (pi: ExtensionAPI) {
 						ctx.ui.notify(`Started a ${context === "fork" ? "forked" : "fresh"} ${SUBAGENT_AGENT} subagent; its result comes back here when it finishes.`, "info");
 					} catch (error) {
 						if (error instanceof Cancelled) return;
-						ctx.ui.notify(`/better couldn't start the subagent: ${error instanceof Error ? error.message : String(error)}`, "error");
+						ctx.ui.notify(`/better-prompt couldn't start the subagent: ${error instanceof Error ? error.message : String(error)}`, "error");
 					}
 					return;
 				}
 				if (choice === "tweak") {
 					const note = await ctx.ui.input("What should change?", "e.g. drop the VM part (empty = edit by hand)");
 					if (note === undefined) {
-						ctx.ui.notify("/better cancelled; nothing was sent", "info");
+						ctx.ui.notify("/better-prompt cancelled; nothing was sent", "info");
 						return;
 					}
 					if (note.trim()) {
@@ -359,5 +395,85 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 		},
+	});
+
+	pi.registerCommand("better", {
+		description: "Deepen a prompt (or the current task) with a read-only helper, then send the improved prompt right away",
+		getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
+		handler: async (args, ctx) => {
+			const prepared = prepare("better", args, ctx);
+			if (!prepared) return;
+			const { prompt, canFork } = prepared;
+			let result: BetterResult | undefined;
+			try {
+				helperRegistration ??= registerHelper(pi);
+				result = await runHelper(pi, ctx, buildHelperTask({ helper: helper(), prompt, returns: "structured" }), canFork ? "fork" : "fresh");
+			} catch (error) {
+				return failed(ctx, "better", error);
+			}
+			if (!result) {
+				ctx.ui.notify("/better cancelled; nothing was sent", "info");
+				return;
+			}
+			pi.appendEntry("better", { prompt, result });
+			ctx.ui.notify("/better: sending the improved prompt", "info");
+			if (!ctx.isIdle()) await ctx.waitForIdle();
+			pi.sendUserMessage(result.prompt);
+		},
+	});
+
+	const registerBetterBoomerang = () =>
+		pi.registerCommand("better-boomerang", {
+			description: "Deepen a prompt (or the current task) right here inside a /boomerang run, then send the improved prompt once it folds up",
+			getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
+			handler: async (args, ctx) => {
+				const prompt = args.trim();
+				if (!prompt && ctx.sessionManager.getBranch().length === 0) {
+					ctx.ui.notify("/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>", "error");
+					return;
+				}
+				if (inline) {
+					ctx.ui.notify("/better-boomerang is already running; wait for it to finish.", "error");
+					return;
+				}
+				if (!ctx.isIdle()) await ctx.waitForIdle();
+				// /boomerang reads `->` as chain syntax and a few other tokens as its own flags.
+				const task = buildHelperTask({ helper: helper(), prompt, returns: "marked" }).replaceAll("->", "→");
+				if (!boomerangSafe(task)) {
+					return failed(ctx, "better-boomerang", new Error("the prompt contains `--`, `--rethrow` or `--loop`, which /boomerang would read as its own flags"));
+				}
+				// pi-boomerang collapses the run back to the entry that is the leaf when it starts.
+				inline = { prompt, startLeafId: ctx.sessionManager.getLeafId() };
+				pi.sendUserMessage(`/boomerang ${task}`, { expandPromptTemplates: true });
+			},
+		});
+
+	pi.on("agent_end", (event) => {
+		if (!inline) return;
+		const reply = lastAssistantText(event.messages);
+		if (reply) inline.reply = reply;
+	});
+
+	// pi-boomerang folds its run up with navigateTree inside agent_settled. A prompt sent from here is held until
+	// those handlers return and runs before pi-boomerang's own follow-up, so the improved prompt is what runs next.
+	pi.on("session_tree", (event, ctx) => {
+		if (!inline || !event.summaryEntry || event.summaryEntry.parentId !== inline.startLeafId) return;
+		const run = inline;
+		inline = undefined;
+		let improved: string;
+		try {
+			improved = parseMarkedPrompt(run.reply ?? "");
+		} catch (error) {
+			return failed(ctx, "better-boomerang", error);
+		}
+		toRecord = { prompt: run.prompt, improved };
+		ctx.ui.notify("/better-boomerang: sending the improved prompt", "info");
+		pi.sendUserMessage(improved);
+	});
+
+	pi.on("before_agent_start", (event) => {
+		if (!toRecord || event.messageType !== "user" || event.prompt !== toRecord.improved) return;
+		pi.appendEntry("better", { prompt: toRecord.prompt, inline: true, improved: toRecord.improved });
+		toRecord = undefined;
 	});
 }

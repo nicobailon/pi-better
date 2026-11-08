@@ -1,10 +1,39 @@
 # pi-better
 
-`/better` turns a prompt into a deeper version of itself before you send it. A helper with a copy of your conversation reads the real material the prompt touches (code, screenshots, docs), works out what a top professional would do, and rewrites the prompt with those facts in it. You see the result and choose: send it, have it changed, edit it yourself, or drop it.
+`/better` turns a prompt into a deeper version of itself and sends that instead. A read-only helper with a copy of your conversation reads the real material the prompt touches (code, screenshots, docs), works out what a top professional would do, and rewrites the prompt with those facts in it.
 
 ```
 /better make the buttons feel clickable when I hover them
 ```
+
+Three commands, one rewrite method:
+
+```
+/better <prompt>            helper (separate run, read-only) ─► rewrite ─► sent as your message right away
+/better-prompt <prompt>     helper (separate run, read-only) ─► rewrite ─► box: you fire, tweak, edit, … or cancel
+/better-boomerang <prompt>  this chat rewrites it inside a /boomerang run ─► run folds into a summary
+                                                                          ─► rewrite sent as your message
+```
+
+Leave the prompt out of any of them to deepen the task you're working on now, including any feedback you gave on work so far.
+
+## Install
+
+```bash
+pi install /Users/nicobailon/.pi/agent/skills/pi-better
+```
+
+`/better` and `/better-prompt` need [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `/better-boomerang` and the `b` key show only when [pi-boomerang](https://github.com/nicobailon/pi-boomerang) is loaded.
+
+## Use
+
+### `/better`: rewrite and send
+
+While the helper works you see its progress; Esc cancels it. When it's done you get a short notice ("/better: sending the improved prompt") and the improved prompt goes out as your message. If the helper fails or returns something malformed, nothing is sent and you get an error.
+
+### `/better-prompt`: rewrite, then choose
+
+The same helper, but the improved prompt shows in a box first, with the reasoning folded away under `w`:
 
 ```
 ┌─ Improved prompt ────────────────────────────────┐
@@ -16,21 +45,6 @@
 └──────────────────────────────────────────────────┘
 ```
 
-## Install
-
-```bash
-pi install /Users/nicobailon/.pi/agent/skills/pi-better
-```
-
-It needs [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `b` (fire as /boomerang) shows only when [pi-boomerang](https://github.com/nicobailon/pi-boomerang) is loaded.
-
-## Use
-
-- `/better <prompt>`: deepen that prompt.
-- `/better`: deepen the task you're working on now, including any feedback you gave on work so far.
-
-While the helper works you see its progress; Esc cancels it. Then the box shows the improved prompt, with the reasoning folded away under `w`:
-
 | Key | What happens |
 |---|---|
 | Enter | Sends the prompt as your message. |
@@ -41,38 +55,41 @@ While the helper works you see its progress; Esc cancels it. Then the box shows 
 | `w` | Shows or hides the four answers behind the rewrite. |
 | Esc | Closes the box; nothing is sent. |
 
+### `/better-boomerang`: rewrite here, folded away
+
+No helper: the agent in this chat does the rewrite itself, inside a `/boomerang` run. It can read and run commands like any turn here, but it's told only to read and rewrite. When it finishes, pi-boomerang folds the run into a summary, and the improved prompt (the block it ended its reply with) goes out as your message. If the block is missing, nothing is sent and you get an error.
+
+pi-boomerang then adds its own follow-up turn about the summary. That turn runs after the improved prompt, so it usually ends with a one-line "nothing left to do" note.
+
 ## How it works
 
-Nothing is ever sent on its own: the improved prompt goes out only when you press a key in the box.
+```
+ YOU  /better <prompt>   /better-prompt <prompt>   /better-boomerang <prompt>
+      (leave the prompt out to deepen what we're doing now)
+          │                    │                            │
+          ▼                    ▼                            ▼
+┌─ helper (/better and /better-prompt) ──────────┐   ┌─ this chat (/better-boomerang) ───────────┐
+│ pi-better-helper, registered once per session  │   │ pi-better starts "/boomerang <task>":     │
+│ tools: read · grep · find · ls · bash          │   │ the agent here reads, answers (1)–(4),    │
+│ (no edit, no write)                            │   │ and ends its reply with the prompt in an  │
+│ copy of this chat if the session is saved,     │   │ <improved-prompt> block                   │
+│ else a fresh start                             │   │ pi-boomerang folds the run into a summary │
+│ reads the real material, answers (1)–(4),      │   └──────────────────┬────────────────────────┘
+│ returns a fixed schema                         │                      │ block missing → error,
+└────────┬──────────────────────┬────────────────┘                      │ nothing sent
+         │ bad shape → error,   │                                       │
+         │ nothing sent         │                                       │
+         ▼                      ▼                                       ▼
+  /better                /better-prompt                           sent as your message,
+  "sending the           box: Enter fire · b /boomerang ·         before pi-boomerang's own
+  improved prompt"       s subagent · t tweak · e edit ·          follow-up turn
+  → sent as your         w why · Esc cancel
+  message
+```
+
+In the box:
 
 ```
- YOU  /better <prompt>          or just  /better  (= "deepen what we're doing now")
-  │
-  ▼
-┌─ pi-better (in your Pi window) ──────────────────────────────────────────┐
-│ 1. bare /better in a new session with no history? → error: give a prompt │
-│ 2. registers its helper agent once: pi-better-helper                     │
-│      tools: read · grep · find · ls · bash   (no edit, no write)         │
-│ 3. copy of this chat?  session saved already → yes (fork)                │
-│                        new session           → no  (fresh)               │
-└──────────────────────────────┬───────────────────────────────────────────┘
-                               │ task = helper.md + your prompt (+ tweak note, if any)
-                               ▼
-┌─ helper (runs on its own; your chat only shows a spinner) ───────────────┐
-│ reads the real material first (code, files, docs)                        │
-│ answers: (1) what a top professional would add  (2) the rawest material  │
-│          (3) methods and tools  (4) what outside check shows it's right  │
-│ writes the better prompt (never carries it out)                          │
-│ returns a fixed schema; a bad shape is a loud error and nothing is sent  │
-└──────────────────────────────┬───────────────────────────────────────────┘
-                               ▼
-        stored as a session entry the model never sees
-                               ▼
-┌─ Improved prompt ─────────────────────────────────────────────┐
-│ <the better prompt, in full>                                  │
-│ Enter fire · b /boomerang · s subagent · t tweak · e edit     │
-│ w why (the 4 answers) · Esc cancel                            │
-└───┬──────┬──────┬────────┬───────┬──────┬────────────────────┘
   Enter    b      s        t       e     Esc
     │      │      │        │       │      └─► nothing sent
     │      │      │        │       └─► prompt goes into your input box; you edit and send it
@@ -85,23 +102,26 @@ Nothing is ever sent on its own: the improved prompt goes out only when you pres
     └─► sent as your normal message; the agent runs it here
 ```
 
-The helper runs on `pi-claude/claude-opus-5-5` with high thinking. `/better` registers it with pi-subagents on first use and removes it when the session ends.
+The helper runs on `pi-claude/claude-opus-5-5` with high thinking. pi-better registers it with pi-subagents on first use and removes it when the session ends. Every rewrite is also stored as a session entry the model never sees.
 
-Your conversation only gains what you send, and earlier history never changes, so the prompt cache stays warm:
+With `/better` and `/better-prompt`, your conversation only gains the message that gets sent, and earlier history never changes, so the prompt cache stays warm:
 
 ```
 chat before   [ … earlier messages … ]
-chat after    [ … earlier messages … ] + your one message (only on Enter or b)
+chat after    [ … earlier messages … ] + your one message
               the helper's work and your tweaks stay outside the chat
 ```
 
-Outside the interactive terminal (print, JSON or RPC mode), `/better` posts the answers and the prompt as a message and stops.
+`/better-boomerang` does its rewrite in this chat, then pi-boomerang replaces that work with a summary, which rewrites recent history once.
+
+Outside the interactive terminal (print, JSON or RPC mode), `/better-prompt` posts the answers and the prompt as a message and stops; `/better` still sends the prompt.
 
 ## Limitations
 
 - The helper can't ask you questions while it works; you're waiting on it, so it decides from what it can read.
 - The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; `helper.md` tells it not to.
-- In a new session with no history yet, there's nothing to fork: `/better` needs a prompt, and `s` offers only Fresh.
+- In a new session with no history yet, there's nothing to fork: each command needs a prompt, and `s` offers only Fresh.
+- `/better-boomerang` turns `->` in your prompt into `→`, because /boomerang reads `->` as its own chain syntax, and refuses a prompt with a `--`, `--rethrow` or `--loop` word.
 - `b` is hidden when the prompt starts with `/` or a /boomerang subcommand word, or contains `->`, `--`, `--rethrow` or `--loop`, because /boomerang would read those as its own syntax.
 - A very long prompt makes a tall box; edit it with `e` if it doesn't fit your screen.
 
