@@ -43,9 +43,57 @@ While the helper works you see its progress; Esc cancels it. Then the box shows 
 
 ## How it works
 
-The helper is `pi-better-helper`, an agent `/better` registers with pi-subagents while Pi runs (and removes when the session ends). It can read, search, list files and run shell commands, but has no edit or write tool. It runs on `pi-claude/claude-opus-5-5` with high thinking, started from a fork of your conversation (a fresh start in a new session that has no history yet). It follows `helper.md`: answer four questions (what a top professional would do that you didn't ask for, the rawest material, the methods and tools, and what outside check shows the result is right), gather that raw material first, then rewrite. It never carries the prompt out. It returns its answers through a fixed schema, and `/better` fails loudly if the shape is wrong.
+Nothing is ever sent on its own: the improved prompt goes out only when you press a key in the box.
 
-Your conversation only gains what you send. The helper runs in its own fork, each result is stored as a session entry the model doesn't see, and firing adds just your message. Earlier history never changes, so the prompt cache stays warm.
+```
+ YOU  /better <prompt>          or just  /better  (= "deepen what we're doing now")
+  │
+  ▼
+┌─ pi-better (in your Pi window) ──────────────────────────────────────────┐
+│ 1. bare /better in a new session with no history? → error: give a prompt │
+│ 2. registers its helper agent once: pi-better-helper                     │
+│      tools: read · grep · find · ls · bash   (no edit, no write)         │
+│ 3. copy of this chat?  session saved already → yes (fork)                │
+│                        new session           → no  (fresh)               │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               │ task = helper.md + your prompt (+ tweak note, if any)
+                               ▼
+┌─ helper (runs on its own; your chat only shows a spinner) ───────────────┐
+│ reads the real material first (code, files, docs)                        │
+│ answers: (1) what a top professional would add  (2) the rawest material  │
+│          (3) methods and tools  (4) what outside check shows it's right  │
+│ writes the better prompt (never carries it out)                          │
+│ returns a fixed schema; a bad shape is a loud error and nothing is sent  │
+└──────────────────────────────┬───────────────────────────────────────────┘
+                               ▼
+        stored as a session entry the model never sees
+                               ▼
+┌─ Improved prompt ─────────────────────────────────────────────┐
+│ <the better prompt, in full>                                  │
+│ Enter fire · b /boomerang · s subagent · t tweak · e edit     │
+│ w why (the 4 answers) · Esc cancel                            │
+└───┬──────┬──────┬────────┬───────┬──────┬────────────────────┘
+  Enter    b      s        t       e     Esc
+    │      │      │        │       │      └─► nothing sent
+    │      │      │        │       └─► prompt goes into your input box; you edit and send it
+    │      │      │        └─► "What should change?"
+    │      │      │              note  → helper redoes it ──► box shows again (loop)
+    │      │      │              empty → same as e · Esc → nothing sent
+    │      │      └─► Forked (copy of this chat) | Fresh (empty) background worker;
+    │      │          its result comes back into this chat when it finishes
+    │      └─► sent as "/boomerang <prompt>": the work runs, then folds into a summary
+    └─► sent as your normal message; the agent runs it here
+```
+
+The helper runs on `pi-claude/claude-opus-5-5` with high thinking. `/better` registers it with pi-subagents on first use and removes it when the session ends.
+
+Your conversation only gains what you send, and earlier history never changes, so the prompt cache stays warm:
+
+```
+chat before   [ … earlier messages … ]
+chat after    [ … earlier messages … ] + your one message (only on Enter or b)
+              the helper's work and your tweaks stay outside the chat
+```
 
 Outside the interactive terminal (print, JSON or RPC mode), `/better` posts the answers and the prompt as a message and stops.
 
