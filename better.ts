@@ -69,7 +69,8 @@ export function buildHelperTask({ helper, prompt, tweak }: TaskInput): string {
  * and `->`, `--`, `--rethrow` or `--loop` tokens. Such a prompt can't go through it unchanged.
  */
 export function boomerangSafe(prompt: string): boolean {
-	const tokens = prompt.trim().split(/\s+/);
+	// /boomerang drops quote marks before it reads tokens, so a quoted "->" still counts.
+	const tokens = prompt.replace(/["']/g, "").trim().split(/\s+/);
 	if (tokens[0].startsWith("/") || ["auto", "anchor", "tool", "guidance"].includes(tokens[0])) return false;
 	return !tokens.some((token) => token === "->" || token === "--" || token.startsWith("--rethrow") || token.startsWith("--loop"));
 }

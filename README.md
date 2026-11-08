@@ -43,7 +43,7 @@ While the helper works you see its progress; Esc cancels it. Then the box shows 
 
 ## How it works
 
-The helper is pi-subagents' `delegate` agent on `pi-claude/claude-opus-5-5` with high thinking, started from a fork of your conversation (a fresh start in a new session that has no history yet). It follows `helper.md`: answer four questions (what a top professional would do that you didn't ask for, the rawest material, the methods and tools, and what outside check shows the result is right), gather that raw material first, then rewrite. It never carries the prompt out. It returns its answers through a fixed schema, and `/better` fails loudly if the shape is wrong.
+The helper is `pi-better-helper`, an agent `/better` registers with pi-subagents while Pi runs (and removes when the session ends). It can read, search, list files and run shell commands, but has no edit or write tool. It runs on `pi-claude/claude-opus-5-5` with high thinking, started from a fork of your conversation (a fresh start in a new session that has no history yet). It follows `helper.md`: answer four questions (what a top professional would do that you didn't ask for, the rawest material, the methods and tools, and what outside check shows the result is right), gather that raw material first, then rewrite. It never carries the prompt out. It returns its answers through a fixed schema, and `/better` fails loudly if the shape is wrong.
 
 Your conversation only gains what you send. The helper runs in its own fork, each result is stored as a session entry the model doesn't see, and firing adds just your message. Earlier history never changes, so the prompt cache stays warm.
 
@@ -52,14 +52,15 @@ Outside the interactive terminal (print, JSON or RPC mode), `/better` posts the 
 ## Limitations
 
 - The helper can't ask you questions while it works; you're waiting on it, so it decides from what it can read.
-- The helper has edit and write tools; only `helper.md` keeps it from changing files. pi-subagents runs it in the foreground, where agents that list extension tools (such as `oracle` with `intercom`) can't start.
+- The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; `helper.md` tells it not to.
 - In a new session with no history yet, there's nothing to fork: `/better` needs a prompt, and `s` offers only Fresh.
 - `b` is hidden when the prompt starts with `/` or a /boomerang subcommand word, or contains `->`, `--`, `--rethrow` or `--loop`, because /boomerang would read those as its own syntax.
 - A very long prompt makes a tall box; edit it with `e` if it doesn't fit your screen.
 
 ## Troubleshooting
 
-- "pi-subagents didn't pick up the request": load pi-subagents, then `/reload`.
+- "pi-subagents didn't register the helper agent" or "didn't pick up the request": load pi-subagents, then `/reload`.
+- "pi-subagents refused the helper agent": usually another agent is already named `pi-better-helper`; rename or remove it.
 - "The helper failed: …": the text after it comes from pi-subagents (timeout after 20 minutes, unknown agent or model, and so on).
 
 ## Development

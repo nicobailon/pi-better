@@ -43,6 +43,7 @@ test("boomerangSafe refuses prompts /boomerang would read as its own syntax", ()
 	assert.equal(boomerangSafe("/deslop the module"), false);
 	assert.equal(boomerangSafe("auto on"), false);
 	assert.equal(boomerangSafe("Step one -> step two"), false);
+	assert.equal(boomerangSafe('Replace "->" with "=>" in /src/a.ts'), false);
 	assert.equal(boomerangSafe("Run it twice --rethrow 2"), false);
 	assert.equal(boomerangSafe("Keep going --loop 3"), false);
 });

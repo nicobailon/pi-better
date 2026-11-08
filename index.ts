@@ -12,9 +12,18 @@ const UPDATE_EVENT = "prompt-template:subagent:update";
 const RESPONSE_EVENT = "prompt-template:subagent:response";
 const CANCEL_EVENT = "prompt-template:subagent:cancel";
 
-// pi-subagents runs this request as a foreground child, which can't load extension tools; delegate lists none.
-// It has edit and write, so helper.md is what keeps it read-only.
-const HELPER_AGENT = "delegate";
+// Registered with pi-subagents at runtime (pi-subagents docs/extension-api.md, "Runtime agent registration").
+// No edit or write tool; bash stays for read-only searches and experiments, and helper.md forbids writes.
+// The list has no extension tools, because pi-subagents runs this request as a foreground child that can't load them.
+const HELPER_AGENT = "pi-better-helper";
+const RUNTIME_AGENT_REGISTER_EVENT = "pi-subagents:runtime-agent-register:v1";
+const HELPER_DEFINITION = {
+	description: "Reads the material a prompt touches and rewrites the prompt for /better; never edits or starts work",
+	systemPrompt: "You read and rewrite. Never edit files, start the work, or launch anything.",
+	tools: ["read", "grep", "find", "ls", "bash"],
+	inheritProjectContext: true,
+	inheritSkills: false,
+};
 const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 
@@ -99,19 +108,36 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context
 	});
 }
 
-function spawnSubagent(pi: ExtensionAPI, cwd: string, task: string, context: Context): Promise<void> {
+function registerHelper(pi: ExtensionAPI): { dispose(): void } {
+	const request: { version: 1; name: string; definition: typeof HELPER_DEFINITION; result?: any } = { version: 1, name: HELPER_AGENT, definition: HELPER_DEFINITION };
+	pi.events.emit(RUNTIME_AGENT_REGISTER_EVENT, request);
+	if (!request.result) throw new Error("pi-subagents didn't register the helper agent. /better needs the pi-subagents extension loaded.");
+	if (!request.result.ok) throw new Error(`pi-subagents refused the helper agent: ${request.result.error?.message ?? String(request.result.error)}`);
+	return request.result.registration;
+}
+
+function spawnSubagent(pi: ExtensionAPI, cwd: string, task: string, context: Context, signal: AbortSignal): Promise<void> {
 	const requestId = randomUUID();
 	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
+		const stop = () => {
+			clearTimeout(timer);
 			off();
+			signal.removeEventListener("abort", onAbort);
+		};
+		const onAbort = () => {
+			stop();
+			reject(new Cancelled());
+		};
+		const timer = setTimeout(() => {
+			stop();
 			reject(new Error("pi-subagents didn't answer the launch within 30s."));
 		}, 30_000);
 		const off = pi.events.on(RPC_REPLY_EVENT_PREFIX + requestId, (reply: any) => {
-			clearTimeout(timer);
-			off();
+			stop();
 			if (reply?.success) resolve();
 			else reject(new Error(reply?.error?.message ?? "unknown error"));
 		});
+		signal.addEventListener("abort", onAbort, { once: true });
 		pi.events.emit(RPC_REQUEST_EVENT, {
 			version: 1,
 			requestId,
@@ -141,8 +167,15 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 		box.addChild(loader);
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
 		askHelper(pi, ctx.cwd, task, context, loader.signal, (progress) => loader.setMessage(progressText(progress))).then(
-			(result) => done({ result }),
-			(error) => done(error instanceof Cancelled ? {} : { error }),
+			// Dispose here too: on an immediate failure done() runs before Pi stores the component, so Pi never disposes it.
+			(result) => {
+				loader.dispose();
+				done({ result });
+			},
+			(error) => {
+				loader.dispose();
+				done(error instanceof Cancelled ? {} : { error });
+			},
 		);
 		return {
 			render: (width: number) => box.render(width),
@@ -220,6 +253,18 @@ function plainText(result: BetterResult): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	let helperRegistration: { dispose(): void } | undefined;
+	// Aborted at session shutdown so a pending subagent launch stops before it can touch the stale context.
+	let session = new AbortController();
+	pi.on("session_start", () => {
+		session = new AbortController();
+	});
+	pi.on("session_shutdown", () => {
+		session.abort();
+		helperRegistration?.dispose();
+		helperRegistration = undefined;
+	});
+
 	pi.registerCommand("better", {
 		description: "Deepen a prompt (or the current task) with a helper, then fire, tweak, edit, run as a subagent, or cancel it",
 		handler: async (args, ctx) => {
@@ -230,6 +275,14 @@ export default function (pi: ExtensionAPI) {
 			const canFork = sessionFile !== undefined && existsSync(sessionFile);
 			if (!prompt && !canFork) {
 				ctx.ui.notify("/better has no task to deepen yet; give it a prompt: /better <prompt>", "error");
+				return;
+			}
+			try {
+				helperRegistration ??= registerHelper(pi);
+			} catch (error) {
+				const message = `/better failed: ${error instanceof Error ? error.message : String(error)}`;
+				if (ctx.hasUI) ctx.ui.notify(message, "error");
+				else throw new Error(message);
 				return;
 			}
 			let tweak: { previous: BetterResult; note: string } | undefined;
@@ -275,9 +328,10 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (choice === "subagent" && context) {
 					try {
-						await spawnSubagent(pi, ctx.cwd, result.prompt, context);
+						await spawnSubagent(pi, ctx.cwd, result.prompt, context, session.signal);
 						ctx.ui.notify(`Started a ${context === "fork" ? "forked" : "fresh"} ${SUBAGENT_AGENT} subagent; its result comes back here when it finishes.`, "info");
 					} catch (error) {
+						if (error instanceof Cancelled) return;
 						ctx.ui.notify(`/better couldn't start the subagent: ${error instanceof Error ? error.message : String(error)}`, "error");
 					}
 					return;
