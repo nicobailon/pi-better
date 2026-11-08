@@ -1,0 +1,21 @@
+{
+  "name": "pi-better",
+  "version": "0.1.0",
+  "description": "/better: a forked helper deepens your prompt, then you fire, tweak, edit or cancel it",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "files": ["index.ts", "better.ts", "helper.md", "README.md", "CHANGELOG.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test better.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
