@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Key, Markdown, Spacer, Text, matchesKey, type TUI } from "@earendil-works/pi-tui";
-import { type BetterResult, RESULT_SCHEMA, boomerangSafe, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
+import { type BetterResult, RESULT_SCHEMA, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
 
 // pi-subagents' structured delegation events (pi-subagents src/api/delegation.ts).
 const REQUEST_EVENT = "prompt-template:subagent:request";
@@ -42,12 +42,11 @@ interface Progress {
 	durationMs?: number;
 }
 
-type Choice = "fire" | "boomerang" | "subagent" | "tweak" | "edit" | "cancel";
+type Choice = "fire" | "subagent" | "tweak" | "edit" | "cancel";
 
 type Context = "fork" | "fresh";
 
 interface Offers {
-	boomerang: boolean;
 	subagent: boolean;
 }
 
@@ -212,7 +211,6 @@ function resultBox(tui: TUI, theme: Theme, result: BetterResult, offers: Offers,
 		box.addChild(new Spacer(1));
 		const keys = [
 			"Enter fire",
-			...(offers.boomerang ? ["b fire as /boomerang"] : []),
 			...(offers.subagent ? ["s run as a subagent"] : []),
 			"t tweak",
 			"e edit",
@@ -228,7 +226,6 @@ function resultBox(tui: TUI, theme: Theme, result: BetterResult, offers: Offers,
 		invalidate: () => box.invalidate(),
 		handleInput(data: string) {
 			if (matchesKey(data, Key.enter)) done("fire");
-			else if (offers.boomerang && matchesKey(data, "b")) done("boomerang");
 			else if (offers.subagent && matchesKey(data, "s")) done("subagent");
 			else if (matchesKey(data, "t")) done("tweak");
 			else if (matchesKey(data, "e")) done("edit");
@@ -333,7 +330,6 @@ export default function (pi: ExtensionAPI) {
 				}
 				const shown = result;
 				const offers: Offers = {
-					boomerang: pi.getCommands().some((command) => command.name === "boomerang") && boomerangSafe(result.prompt),
 					subagent: pi.getAllTools().some((tool) => tool.name === "subagent"),
 				};
 				let choice: Choice;
@@ -379,8 +375,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (!ctx.isIdle()) await ctx.waitForIdle();
-				if (choice === "boomerang") pi.sendUserMessage(`/boomerang ${result.prompt}`, { expandPromptTemplates: true });
-				else pi.sendUserMessage(result.prompt);
+				pi.sendUserMessage(result.prompt);
 				return;
 			}
 		},

@@ -18,11 +18,9 @@ Leave the prompt out of any of them to deepen the task you're working on now, in
 
 ## Install
 
-```bash
-pi install /Users/nicobailon/.pi/agent/skills/pi-better
-```
+pi-better lives in `~/.pi/agent/extensions/pi-better`, and Pi loads it from there automatically; no `pi install` needed. To keep it somewhere else, run `pi install <path>` on that folder instead.
 
-`/better` and `/better-prompt` need [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `/better-boomerang` needs no other extension. The `b` key in the box shows only when [pi-boomerang](https://github.com/nicobailon/pi-boomerang) is loaded.
+`/better` and `/better-prompt` need [pi-subagents](https://github.com/nicobailon/pi-subagents) loaded; the helper runs as one of its subagents, and `s` launches the prompt through it. `/better-boomerang` needs no other extension.
 
 ## Use
 
@@ -38,8 +36,8 @@ The same helper, but the improved prompt shows in a box first, with the reasonin
 ┌─ Improved prompt ────────────────────────────────┐
 │ ▸ why (w)                                        │
 │ Clickable things in the app don't look …         │
-│ Enter fire · b fire as /boomerang                │
-│ s run as a subagent · t tweak · e edit           │
+│ Enter fire · s run as a subagent                 │
+│ t tweak · e edit                                 │
 │ w show why · Esc cancel                          │
 └──────────────────────────────────────────────────┘
 ```
@@ -47,7 +45,6 @@ The same helper, but the improved prompt shows in a box first, with the reasonin
 | Key | What happens |
 |---|---|
 | Enter | Sends the prompt as your message. |
-| `b` | Sends it as `/boomerang <prompt>`, so the long run folds into a summary when it ends. |
 | `s` | Runs it as a background subagent (a `worker` on `pi-claude/claude-opus-5-5`, high thinking) instead of in this chat. Pick **Forked** to give it a copy of this conversation or **Fresh** to start it empty. Its result comes back into the chat when it finishes, like any pi-subagents background run. |
 | `t` | Asks "What should change?". The helper redoes the prompt with your note and the box comes back; you can tweak again. An empty note puts the prompt in your input box instead. |
 | `e` | Puts the prompt in your input box to edit and send yourself. |
@@ -79,8 +76,8 @@ No helper: the agent in this chat does the rewrite itself, with everything it al
          │ nothing sent         │                                       │
          ▼                      ▼                                       ▼
   /better                /better-prompt                           "sending the improved
-  "sending the           box: Enter fire · b /boomerang ·         prompt" → sent as your
-  improved prompt"       s subagent · t tweak · e edit ·          message; nothing after it
+  "sending the           box: Enter fire · s subagent ·           prompt" → sent as your
+  improved prompt"       t tweak · e edit ·                       message; nothing after it
   → sent as your         w why · Esc cancel
   message
 ```
@@ -88,15 +85,14 @@ No helper: the agent in this chat does the rewrite itself, with everything it al
 In the box:
 
 ```
-  Enter    b      s        t       e     Esc
-    │      │      │        │       │      └─► nothing sent
-    │      │      │        │       └─► prompt goes into your input box; you edit and send it
-    │      │      │        └─► "What should change?"
-    │      │      │              note  → helper redoes it ──► box shows again (loop)
-    │      │      │              empty → same as e · Esc → nothing sent
-    │      │      └─► Forked (copy of this chat) | Fresh (empty) background worker;
-    │      │          its result comes back into this chat when it finishes
-    │      └─► sent as "/boomerang <prompt>": the work runs, then folds into a summary
+  Enter    s        t       e     Esc
+    │      │        │       │      └─► nothing sent
+    │      │        │       └─► prompt goes into your input box; you edit and send it
+    │      │        └─► "What should change?"
+    │      │              note  → helper redoes it ──► box shows again (loop)
+    │      │              empty → same as e · Esc → nothing sent
+    │      └─► Forked (copy of this chat) | Fresh (empty) background worker;
+    │          its result comes back into this chat when it finishes
     └─► sent as your normal message; the agent runs it here
 ```
 
@@ -119,7 +115,6 @@ Outside the interactive terminal (print, JSON or RPC mode), `/better-prompt` pos
 - The helper can't ask you questions while it works; you're waiting on it, so it decides from what it can read.
 - The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; `helper.md` tells it not to.
 - In a new session with no history yet, there's nothing to fork: each command needs a prompt, and `s` offers only Fresh.
-- `b` is hidden when the prompt starts with `/` or a /boomerang subcommand word, or contains `->`, `--`, `--rethrow` or `--loop`, because /boomerang would read those as its own syntax.
 - A very long prompt makes a tall box; edit it with `e` if it doesn't fit your screen.
 
 ## Troubleshooting

@@ -7,6 +7,8 @@
 - `/better <prompt>` now rewrites the prompt and sends it right away; the box with fire, tweak, edit, subagent and cancel moved to `/better-prompt`.
 - New `/better-boomerang <prompt>`: the agent in this chat rewrites the prompt with everything it already knows, then the chat jumps back to where it started and the improved prompt is sent as your message. The rewrite stays in `/tree`, and no other extension is needed.
 - Typing a space after any of the three commands shows what its argument is for.
+- pi-better no longer uses pi-boomerang anywhere: the `b` key in the `/better-prompt` box is gone, so the box offers fire, subagent, tweak, edit and cancel.
+- pi-better lives in `~/.pi/agent/extensions/pi-better` and Pi loads it from there automatically, with no `pi install`.
 
 ## [0.1.0] - 2026-11-08
 

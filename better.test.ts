@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boomerangSafe, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
+import { buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
 
 const result = {
 	professional: "Inventory every clickable element.",
@@ -44,15 +44,4 @@ test("a marked task's reply gives back the prompt in its last marked block", () 
 	assert.equal(parseMarkedPrompt(reply), "Reply with exactly hi.");
 	assert.throws(() => parseMarkedPrompt("(1) Read the code. No block."), /no <improved-prompt>/);
 	assert.throws(() => parseMarkedPrompt("<improved-prompt>\n \n</improved-prompt>"), /empty/);
-});
-
-test("boomerangSafe refuses prompts /boomerang would read as its own syntax", () => {
-	assert.equal(boomerangSafe("Fix the login bug in src/auth.ts"), true);
-	assert.equal(boomerangSafe("Fix the bug.\nThen run /Users/me/test.sh"), true);
-	assert.equal(boomerangSafe("/deslop the module"), false);
-	assert.equal(boomerangSafe("auto on"), false);
-	assert.equal(boomerangSafe("Step one -> step two"), false);
-	assert.equal(boomerangSafe('Replace "->" with "=>" in /src/a.ts'), false);
-	assert.equal(boomerangSafe("Run it twice --rethrow 2"), false);
-	assert.equal(boomerangSafe("Keep going --loop 3"), false);
 });

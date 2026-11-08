@@ -99,14 +99,3 @@ export function parseMarkedPrompt(reply: string): string {
 	if (!prompt) throw new Error(`The reply's ${OPEN} block is empty.`);
 	return prompt;
 }
-
-/**
- * /boomerang reads some of its argument as its own syntax: a leading `/` or subcommand word,
- * and `->`, `--`, `--rethrow` or `--loop` tokens. Such a prompt can't go through it unchanged.
- */
-export function boomerangSafe(prompt: string): boolean {
-	// /boomerang drops quote marks before it reads tokens, so a quoted "->" still counts.
-	const tokens = prompt.replace(/["']/g, "").trim().split(/\s+/);
-	if (tokens[0].startsWith("/") || ["auto", "anchor", "tool", "guidance"].includes(tokens[0])) return false;
-	return !tokens.some((token) => token === "->" || token === "--" || token.startsWith("--rethrow") || token.startsWith("--loop"));
-}
