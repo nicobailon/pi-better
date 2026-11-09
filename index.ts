@@ -269,6 +269,27 @@ function failed(ctx: ExtensionContext, command: string, error: unknown): void {
 	ctx.ui.notify(message, "error");
 }
 
+/**
+ * Puts the prompt in the input box for the user to read and send. A draft already there stays, below the prompt.
+ * Print and JSON mode have no editor and RPC's set_editor_text gets no reply, so outside the TUI the prompt
+ * (or `posted`, when given) is posted as a message instead.
+ */
+function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, posted?: { content: string; details: unknown }): void {
+	if (ctx.mode !== "tui") {
+		pi.sendMessage({ customType: "better", content: posted?.content ?? prompt, display: true, details: posted?.details });
+		return;
+	}
+	const draft = ctx.ui.getEditorText().trim();
+	ctx.ui.setEditorText(draft ? `${prompt}\n\n${draft}` : prompt);
+	// setEditorText doesn't repaint on its own; the notice does, so the prompt shows right away.
+	ctx.ui.notify(
+		draft
+			? "The improved prompt is in your input box, above the draft you'd typed. Edit it, then press Enter to send."
+			: "The improved prompt is in your input box. Edit it, then press Enter to send.",
+		"info",
+	);
+}
+
 export default function (pi: ExtensionAPI) {
 	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 	let helperRegistration: { dispose(): void } | undefined;
@@ -325,7 +346,7 @@ export default function (pi: ExtensionAPI) {
 				pi.appendEntry("better", { prompt, tweakNote: tweak?.note, result });
 
 				if (ctx.mode !== "tui") {
-					pi.sendMessage({ customType: "better", content: plainText(result), display: true, details: result });
+					handOver(pi, ctx, result.prompt, { content: plainText(result), details: result });
 					return;
 				}
 				const shown = result;
@@ -369,9 +390,7 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 				if (choice === "edit" || choice === "tweak") {
-					ctx.ui.setEditorText(result.prompt);
-					// setEditorText doesn't repaint on its own; the notice does, so the prompt shows right away.
-					ctx.ui.notify("The improved prompt is in your input box. Edit it, then press Enter to send.", "info");
+					handOver(pi, ctx, result.prompt);
 					return;
 				}
 				if (!ctx.isIdle()) await ctx.waitForIdle();
@@ -382,8 +401,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("better", {
-		description: "Deepen a prompt (or the current task) with a read-only helper, then send the improved prompt right away",
-		getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
+		description: "Deepen a prompt (or the current task) with a read-only helper, then put the improved prompt in your input box",
+		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
 		handler: async (args, ctx) => {
 			const prepared = prepare("better", args, ctx);
 			if (!prepared) return;
@@ -400,15 +419,13 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			pi.appendEntry("better", { prompt, result });
-			ctx.ui.notify("/better: sending the improved prompt", "info");
-			if (!ctx.isIdle()) await ctx.waitForIdle();
-			pi.sendUserMessage(result.prompt);
+			handOver(pi, ctx, result.prompt, { content: plainText(result), details: result });
 		},
 	});
 
 	pi.registerCommand("better-boomerang", {
-		description: "Deepen a prompt (or the current task) right here, then jump back and send the improved prompt as if you typed it",
-		getArgumentCompletions: promptCompletions("The prompt to deepen and send. Leave it out to deepen the task in progress."),
+		description: "Deepen a prompt (or the current task) right here, then jump back and put the improved prompt in your input box",
+		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
 		handler: async (args, ctx) => {
 			const prompt = args.trim();
 			if (!prompt && ctx.sessionManager.getBranch().length === 0) {
@@ -454,9 +471,8 @@ export default function (pi: ExtensionAPI) {
 					return failed(ctx, "better-boomerang", new Error("another extension cancelled the jump back to where the rewrite started"));
 				}
 				pi.appendEntry("better", { prompt, inline: true, improved });
-				ctx.ui.notify("/better-boomerang: sending the improved prompt", "info");
 				// navigateTree keeps the same session, so this ctx and pi stay valid.
-				pi.sendUserMessage(improved);
+				handOver(pi, ctx, improved);
 			} finally {
 				inlineRunning = false;
 			}

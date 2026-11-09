@@ -1,6 +1,6 @@
 # pi-better
 
-`/better` turns a prompt into a deeper version of itself and sends that instead. A read-only helper with a copy of your conversation reads the real material the prompt touches (code, screenshots, docs), works out what a top professional would do, and rewrites the prompt with those facts in it.
+`/better` turns a prompt into a deeper version of itself and puts that in your input box, so you read it and press Enter yourself. A read-only helper with a copy of your conversation reads the real material the prompt touches (code, screenshots, docs), works out what a top professional would do, and rewrites the prompt with those facts in it.
 
 ```
 /better make the buttons feel clickable when I hover them
@@ -9,9 +9,9 @@
 Three commands, one rewrite method:
 
 ```
-/better <prompt>            helper (separate run, read-only) ─► rewrite ─► sent as your message right away
+/better <prompt>            helper (separate run, read-only) ─► rewrite ─► your input box; you press Enter
 /better-prompt <prompt>     helper (separate run, read-only) ─► rewrite ─► box: you fire, tweak, edit, … or cancel
-/better-boomerang <prompt>  this chat rewrites it ─► jumps back to where it started ─► rewrite sent as your message
+/better-boomerang <prompt>  this chat rewrites it ─► jumps back to where it started ─► your input box; you press Enter
 ```
 
 Leave the prompt out of any of them to deepen the task you're working on now, including any feedback you gave on work so far.
@@ -24,9 +24,9 @@ pi-better lives in `~/.pi/agent/extensions/pi-better`, and Pi loads it from ther
 
 ## Use
 
-### `/better`: rewrite and send
+### `/better`: rewrite into your input box
 
-While the helper works you see its progress; Esc cancels it. When it's done you get a short notice ("/better: sending the improved prompt") and the improved prompt goes out as your message. If the helper fails or returns something malformed, nothing is sent and you get an error.
+While the helper works you see its progress; Esc cancels it. When it's done the improved prompt is in your input box; read it, change it if you like, and press Enter to send it. Nothing is sent until you do. If you'd already typed something there, it stays, below the improved prompt. If the helper fails or returns something malformed, your input box is left alone and you get an error.
 
 ### `/better-prompt`: rewrite, then choose
 
@@ -53,7 +53,7 @@ The same helper, but the improved prompt shows in a box first, with the reasonin
 
 ### `/better-boomerang`: rewrite here, then jump back
 
-No helper: the agent in this chat does the rewrite itself, with everything it already knows. It can read and run commands like any turn here, but it's told only to read and rewrite, and to end with the prompt in a marked block. Then pi-better jumps the chat back to where the rewrite started (no summary), and sends the improved prompt as your message. The rewrite turn leaves the chat's context but stays in `/tree`. If the block is missing, nothing is sent, you get an error, and the rewrite stays in the chat so you can see what happened.
+No helper: the agent in this chat does the rewrite itself, with everything it already knows. It can read and run commands like any turn here, but it's told only to read and rewrite, and to end with the prompt in a marked block. Then pi-better jumps the chat back to where the rewrite started (no summary) and puts the improved prompt in your input box for you to send. The rewrite turn leaves the chat's context but stays in `/tree`. You can keep typing while the rewrite runs; whatever you typed stays in the box, below the improved prompt. If the block is missing, the chat doesn't jump back, you get an error, and the rewrite stays in the chat so you can see what happened.
 
 ## How it works
 
@@ -75,11 +75,12 @@ No helper: the agent in this chat does the rewrite itself, with everything it al
          │ bad shape → error,   │                                       │
          │ nothing sent         │                                       │
          ▼                      ▼                                       ▼
-  /better                /better-prompt                           "sending the improved
-  "sending the           box: Enter fire · s subagent ·           prompt" → sent as your
-  improved prompt"       t tweak · e edit ·                       message; nothing after it
-  → sent as your         w why · Esc cancel
-  message
+  /better                /better-prompt                           improved prompt in your
+  improved prompt in     box: Enter fire · s subagent ·           input box, above anything
+  your input box, above  t tweak · e edit ·                       you typed meanwhile;
+  anything already       w why · Esc cancel                       you press Enter to send
+  there; you press
+  Enter to send
 ```
 
 In the box:
@@ -98,7 +99,7 @@ In the box:
 
 The helper runs on `pi-claude/claude-opus-5-5` with high thinking. pi-better registers it with pi-subagents on first use and removes it when the session ends. Every rewrite is also stored as a session entry the model never sees.
 
-With `/better` and `/better-prompt`, your conversation only gains the message that gets sent, and earlier history never changes, so the prompt cache stays warm:
+With `/better` and `/better-prompt`, your conversation only gains the message you send, and earlier history never changes, so the prompt cache stays warm:
 
 ```
 chat before   [ … earlier messages … ]
@@ -108,7 +109,7 @@ chat after    [ … earlier messages … ] + your one message
 
 `/better-boomerang` does its rewrite in this chat, then jumps back, so the chat's context afterwards is the same as with the other two: earlier messages plus your one message. The rewrite turn itself was one extra turn on top of the cached history.
 
-Outside the interactive terminal (print, JSON or RPC mode), `/better-prompt` posts the answers and the prompt as a message and stops; `/better` still sends the prompt.
+Outside the interactive terminal (print, JSON or RPC mode) there's no input box pi-better can rely on, so `/better` and `/better-prompt` post the answers and the prompt as a message and stop; `/better-boomerang` posts the prompt.
 
 ## Limitations
 

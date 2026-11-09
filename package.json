@@ -1,7 +1,7 @@
 {
   "name": "pi-better",
   "version": "0.1.0",
-  "description": "/better: a forked helper deepens your prompt, then you fire, tweak, edit or cancel it",
+  "description": "/better: a forked helper deepens your prompt and puts it in your input box for you to send",
   "type": "module",
   "private": true,
   "license": "MIT",
