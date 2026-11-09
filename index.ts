@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { CancellableLoader, Container, Key, Markdown, Spacer, Text, matchesKey, type TUI } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { CancellableLoader, Container } from "@earendil-works/pi-tui";
 import { type BetterResult, RESULT_SCHEMA, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
 
 // pi-subagents' structured delegation events (pi-subagents src/api/delegation.ts).
@@ -27,28 +27,13 @@ const HELPER_DEFINITION = {
 const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 
-// pi-subagents' RPC bridge (pi-subagents src/extension/rpc.ts). Its spawn runs detached (async), and the
-// run's result comes back into the chat the normal pi-subagents way.
-const RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
-const RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
-const SUBAGENT_AGENT = "worker";
-const SUBAGENT_MODEL = "pi-claude/claude-opus-5-5:high";
-const FORKED = "Forked: gets a copy of this conversation";
-const FRESH = "Fresh: starts with an empty context";
-
 interface Progress {
 	toolCount?: number;
 	currentTool?: string;
 	durationMs?: number;
 }
 
-type Choice = "fire" | "subagent" | "tweak" | "edit" | "cancel";
-
 type Context = "fork" | "fresh";
-
-interface Offers {
-	subagent: boolean;
-}
 
 class Cancelled extends Error {}
 
@@ -115,38 +100,6 @@ function registerHelper(pi: ExtensionAPI): { dispose(): void } {
 	return request.result.registration;
 }
 
-function spawnSubagent(pi: ExtensionAPI, cwd: string, task: string, context: Context, signal: AbortSignal): Promise<void> {
-	const requestId = randomUUID();
-	return new Promise((resolve, reject) => {
-		const stop = () => {
-			clearTimeout(timer);
-			off();
-			signal.removeEventListener("abort", onAbort);
-		};
-		const onAbort = () => {
-			stop();
-			reject(new Cancelled());
-		};
-		const timer = setTimeout(() => {
-			stop();
-			reject(new Error("pi-subagents didn't answer the launch within 30s."));
-		}, 30_000);
-		const off = pi.events.on(RPC_REPLY_EVENT_PREFIX + requestId, (reply: any) => {
-			stop();
-			if (reply?.success) resolve();
-			else reject(new Error(reply?.error?.message ?? "unknown error"));
-		});
-		signal.addEventListener("abort", onAbort, { once: true });
-		pi.events.emit(RPC_REQUEST_EVENT, {
-			version: 1,
-			requestId,
-			method: "spawn",
-			source: { extension: "pi-better" },
-			params: { agent: SUBAGENT_AGENT, task, context, model: SUBAGENT_MODEL, cwd },
-		});
-	});
-}
-
 function progressText(progress: Progress): string {
 	const parts = ["Helper is reading and rewriting"];
 	if (progress.toolCount) parts.push(`${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}`);
@@ -185,58 +138,6 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 	});
 	if (outcome.error) throw outcome.error;
 	return outcome.result;
-}
-
-function resultBox(tui: TUI, theme: Theme, result: BetterResult, offers: Offers, done: (choice: Choice) => void) {
-	let showWhy = false;
-	const box = new Container();
-	const build = () => {
-		box.clear();
-		const border = (s: string) => theme.fg("accent", s);
-		box.addChild(new DynamicBorder(border));
-		box.addChild(new Text(theme.bold(theme.fg("accent", "Improved prompt")), 1, 0));
-		if (showWhy) {
-			const why = [
-				`**(1) What a top professional would do**\n\n${result.professional}`,
-				`**(2) Rawest material**\n\n${result.rawMaterial}`,
-				`**(3) Methods and tools**\n\n${result.methods}`,
-				`**(4) What shows it's right**\n\n${result.proof}`,
-			].join("\n\n");
-			box.addChild(new Markdown(why, 1, 1, getMarkdownTheme()));
-		} else {
-			box.addChild(new Text(theme.fg("dim", "▸ why (w)"), 1, 0));
-		}
-		box.addChild(new Spacer(1));
-		box.addChild(new Markdown(result.prompt, 1, 0, getMarkdownTheme()));
-		box.addChild(new Spacer(1));
-		const keys = [
-			"Enter fire",
-			...(offers.subagent ? ["s run as a subagent"] : []),
-			"t tweak",
-			"e edit",
-			`w ${showWhy ? "hide" : "show"} why`,
-			"Esc cancel",
-		];
-		box.addChild(new Text(theme.fg("dim", keys.join(" · ")), 1, 0));
-		box.addChild(new DynamicBorder(border));
-	};
-	build();
-	return {
-		render: (width: number) => box.render(width),
-		invalidate: () => box.invalidate(),
-		handleInput(data: string) {
-			if (matchesKey(data, Key.enter)) done("fire");
-			else if (offers.subagent && matchesKey(data, "s")) done("subagent");
-			else if (matchesKey(data, "t")) done("tweak");
-			else if (matchesKey(data, "e")) done("edit");
-			else if (matchesKey(data, Key.escape)) done("cancel");
-			else if (matchesKey(data, "w")) {
-				showWhy = !showWhy;
-				build();
-				tui.requestRender();
-			}
-		},
-	};
 }
 
 function plainText(result: BetterResult): string {
@@ -293,120 +194,25 @@ function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, poste
 export default function (pi: ExtensionAPI) {
 	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 	let helperRegistration: { dispose(): void } | undefined;
-	// Aborted at session shutdown so a pending subagent launch stops before it can touch the stale context.
-	let session = new AbortController();
 	let inlineRunning = false;
 
-	/** The prompt and whether the helper can get a copy of this conversation, or undefined after telling the user why not. */
-	const prepare = (command: string, args: string, ctx: ExtensionCommandContext) => {
-		const prompt = args.trim();
-		// A fork needs the session file, which Pi writes only once the conversation has history.
-		const sessionFile = ctx.sessionManager.getSessionFile();
-		const canFork = sessionFile !== undefined && existsSync(sessionFile);
-		if (!prompt && !canFork) {
-			ctx.ui.notify(`/${command} has no task to deepen yet; give it a prompt: /${command} <prompt>`, "error");
-			return undefined;
-		}
-		return { prompt, canFork };
-	};
-
-	pi.on("session_start", () => {
-		session = new AbortController();
-	});
 	pi.on("session_shutdown", () => {
-		session.abort();
 		helperRegistration?.dispose();
 		helperRegistration = undefined;
-	});
-
-	pi.registerCommand("better-prompt", {
-		description: "Deepen a prompt (or the current task) with a read-only helper, then fire, tweak, edit, run as a subagent, or cancel it",
-		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
-		handler: async (args, ctx) => {
-			const prepared = prepare("better-prompt", args, ctx);
-			if (!prepared) return;
-			const { prompt, canFork } = prepared;
-			try {
-				helperRegistration ??= registerHelper(pi);
-			} catch (error) {
-				return failed(ctx, "better-prompt", error);
-			}
-			let tweak: { previous: BetterResult; note: string } | undefined;
-			for (;;) {
-				let result: BetterResult | undefined;
-				try {
-					result = await runHelper(pi, ctx, buildHelperTask({ helper: helper(), prompt, returns: "structured", tweak }), canFork ? "fork" : "fresh");
-				} catch (error) {
-					return failed(ctx, "better-prompt", error);
-				}
-				if (!result) {
-					ctx.ui.notify("/better-prompt cancelled", "info");
-					return;
-				}
-				pi.appendEntry("better", { prompt, tweakNote: tweak?.note, result });
-
-				if (ctx.mode !== "tui") {
-					handOver(pi, ctx, result.prompt, { content: plainText(result), details: result });
-					return;
-				}
-				const shown = result;
-				const offers: Offers = {
-					subagent: pi.getAllTools().some((tool) => tool.name === "subagent"),
-				};
-				let choice: Choice;
-				let context: Context | undefined;
-				do {
-					choice = await ctx.ui.custom<Choice>((tui, theme, _keybindings, done) => resultBox(tui, theme, shown, offers, done), {
-						blocked: { kind: "question", message: "Fire, tweak, edit or cancel the improved prompt" },
-					});
-					if (choice === "subagent") {
-						const picked = await ctx.ui.select("Run the improved prompt as a subagent", canFork ? [FORKED, FRESH] : [FRESH]);
-						context = picked === FORKED ? "fork" : picked === FRESH ? "fresh" : undefined;
-					}
-				} while (choice === "subagent" && !context);
-				if (choice === "cancel") {
-					ctx.ui.notify("/better-prompt cancelled; nothing was sent", "info");
-					return;
-				}
-				if (choice === "subagent" && context) {
-					try {
-						await spawnSubagent(pi, ctx.cwd, result.prompt, context, session.signal);
-						ctx.ui.notify(`Started a ${context === "fork" ? "forked" : "fresh"} ${SUBAGENT_AGENT} subagent; its result comes back here when it finishes.`, "info");
-					} catch (error) {
-						if (error instanceof Cancelled) return;
-						ctx.ui.notify(`/better-prompt couldn't start the subagent: ${error instanceof Error ? error.message : String(error)}`, "error");
-					}
-					return;
-				}
-				if (choice === "tweak") {
-					const note = await ctx.ui.input("What should change?", "e.g. drop the VM part (empty = edit by hand)");
-					if (note === undefined) {
-						ctx.ui.notify("/better-prompt cancelled; nothing was sent", "info");
-						return;
-					}
-					if (note.trim()) {
-						tweak = { previous: result, note };
-						continue;
-					}
-				}
-				if (choice === "edit" || choice === "tweak") {
-					handOver(pi, ctx, result.prompt);
-					return;
-				}
-				if (!ctx.isIdle()) await ctx.waitForIdle();
-				pi.sendUserMessage(result.prompt);
-				return;
-			}
-		},
 	});
 
 	pi.registerCommand("better", {
 		description: "Deepen a prompt (or the current task) with a read-only helper, then put the improved prompt in your input box",
 		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
 		handler: async (args, ctx) => {
-			const prepared = prepare("better", args, ctx);
-			if (!prepared) return;
-			const { prompt, canFork } = prepared;
+			const prompt = args.trim();
+			// A fork needs the session file, which Pi writes only once the conversation has history.
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			const canFork = sessionFile !== undefined && existsSync(sessionFile);
+			if (!prompt && !canFork) {
+				ctx.ui.notify("/better has no task to deepen yet; give it a prompt: /better <prompt>", "error");
+				return;
+			}
 			let result: BetterResult | undefined;
 			try {
 				helperRegistration ??= registerHelper(pi);

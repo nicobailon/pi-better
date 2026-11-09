@@ -42,8 +42,6 @@ export interface TaskInput {
 	prompt: string;
 	/** "structured": a helper subagent returns through structured_output. "marked": the main agent ends its reply with a marked block. */
 	returns: "structured" | "marked";
-	/** Set when the user asked for a tweak of an earlier result. */
-	tweak?: { previous: BetterResult; note: string };
 }
 
 const OPEN = "<improved-prompt>";
@@ -69,23 +67,11 @@ ${CLOSE}
 
 Don't carry the prompt out: it is sent as the user's next message once this reply is done.`;
 
-export function buildHelperTask({ helper, prompt, returns, tweak }: TaskInput): string {
+export function buildHelperTask({ helper, prompt, returns }: TaskInput): string {
 	const parts = [helper.trim()];
 	parts.push(prompt.trim()
 		? `## Prompt to deepen\n\n${prompt.trim()}`
 		: "## Prompt to deepen\n\nNone given: deepen the task currently in progress in the conversation so far.");
-	if (tweak) {
-		const { previous, note } = tweak;
-		parts.push([
-			"## Your previous result",
-			`(1) ${previous.professional}`,
-			`(2) ${previous.rawMaterial}`,
-			`(3) ${previous.methods}`,
-			`(4) ${previous.proof}`,
-			`Rewritten prompt:\n\n${previous.prompt}`,
-		].join("\n\n"));
-		parts.push(`## What the user wants changed\n\n${note.trim()}\n\nRevise your previous result to make that change. Keep what the note doesn't touch, and gather more raw material only if the change needs it.`);
-	}
 	parts.push(returns === "structured" ? STRUCTURED_RETURN : MARKED_RETURN);
 	return parts.join("\n\n");
 }
