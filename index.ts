@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container } from "@earendil-works/pi-tui";
-import { type BetterResult, RESULT_SCHEMA, buildHelperTask, parseBetterResult, parseMarkedPrompt } from "./better.ts";
+import { type BetterResult, RESULT_SCHEMA, buildHelperTask, parseMarkedPrompt, trimResult } from "./better.ts";
 
 // pi-subagents' structured delegation events (pi-subagents src/api/delegation.ts).
 const REQUEST_EVENT = "prompt-template:subagent:request";
@@ -33,14 +33,13 @@ interface Progress {
 	currentToolArgs?: string;
 }
 
-type Context = "fork" | "fresh";
-
 class Cancelled extends Error {}
 
-function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context, signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<BetterResult> {
+function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: "fork" | "fresh", signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<BetterResult> {
 	const requestId = randomUUID();
 	const identity = { requestId, ownerRunId: requestId, nodeId: "better" };
-	return new Promise((resolve, reject) => {
+	// trimResult runs outside the executor, so a throw rejects the promise instead of escaping into the event bus.
+	return new Promise<BetterResult>((resolve, reject) => {
 		let started = false;
 		let done = false;
 		const offs = [
@@ -48,18 +47,13 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context
 				if (data?.requestId === requestId) started = true;
 			}),
 			pi.events.on(UPDATE_EVENT, (data: any) => {
-				if (data?.requestId === requestId) onProgress({ toolCount: data.toolCount, currentTool: data.currentTool, currentToolArgs: data.currentToolArgs });
+				if (data?.requestId === requestId) onProgress(data);
 			}),
 			pi.events.on(RESPONSE_EVENT, (data: any) => {
 				if (data?.requestId !== requestId) return;
-				if (data.status !== "completed") return finish(() => reject(new Error(`The helper ${data.status}: ${data.error ?? "no error text"}`)));
-				if (data.result?.kind !== "structured") return finish(() => reject(new Error(`The helper returned a ${data.result?.kind ?? "missing"} result instead of a structured one.`)));
-				try {
-					const result = parseBetterResult(data.result.value);
-					finish(() => resolve(result));
-				} catch (error) {
-					finish(() => reject(error));
-				}
+				// A completed structured request always carries a result that matches RESULT_SCHEMA.
+				if (data.status !== "completed") return finish(() => reject(new Error(`The helper ${data.status.replaceAll("_", " ")}: ${data.error ?? "no error text"}`)));
+				finish(() => resolve(data.result.value));
 			}),
 		];
 		const onAbort = () => {
@@ -88,41 +82,44 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context
 			result: { kind: "structured", schema: RESULT_SCHEMA },
 		});
 		// pi-subagents answers a request with STARTED synchronously, inside emit().
-		if (!started && !done) finish(() => reject(new Error("pi-subagents didn't pick up the request. /better needs the pi-subagents extension loaded.")));
-	});
+		if (!started) finish(() => reject(new Error("pi-subagents didn't pick up the request. /better needs the pi-subagents extension loaded.")));
+	}).then(trimResult);
 }
 
 function registerHelper(pi: ExtensionAPI): { dispose(): void } {
-	const request: { version: 1; name: string; definition: typeof HELPER_DEFINITION; result?: any } = { version: 1, name: HELPER_AGENT, definition: HELPER_DEFINITION };
+	const request: {
+		version: 1;
+		name: string;
+		definition: typeof HELPER_DEFINITION;
+		result?: { ok: true; registration: { dispose(): void } } | { ok: false; error: Error };
+	} = { version: 1, name: HELPER_AGENT, definition: HELPER_DEFINITION };
 	pi.events.emit(RUNTIME_AGENT_REGISTER_EVENT, request);
 	if (!request.result) throw new Error("pi-subagents didn't register the helper agent. /better needs the pi-subagents extension loaded.");
-	if (!request.result.ok) throw new Error(`pi-subagents refused the helper agent: ${request.result.error?.message ?? String(request.result.error)}`);
+	if (!request.result.ok) throw new Error(`pi-subagents refused the helper agent: ${request.result.error.message}`, { cause: request.result.error });
 	return request.result.registration;
 }
 
 function progressText(progress: Progress, elapsedMs: number): string {
 	const parts = ["Helper is reading and rewriting"];
 	if (progress.toolCount) parts.push(`${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}`);
-	if (progress.currentTool) {
-		const args = progress.currentToolArgs?.replace(/\s+/g, " ").trim();
-		parts.push(args ? `${progress.currentTool}: ${args.length > 60 ? `${args.slice(0, 59)}…` : args}` : progress.currentTool);
-	}
+	// pi-subagents already shortens currentToolArgs to a one-line preview.
+	if (progress.currentTool) parts.push(progress.currentToolArgs ? `${progress.currentTool}: ${progress.currentToolArgs}` : progress.currentTool);
 	const seconds = Math.floor(elapsedMs / 1000);
 	parts.push(seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`);
 	return `${parts.join(" · ")} · Esc cancels`;
 }
 
-async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: string, context: Context): Promise<BetterResult | undefined> {
-	if (ctx.mode !== "tui") {
-		return await askHelper(pi, ctx.cwd, task, context, new AbortController().signal, () => {});
-	}
-	const outcome = await ctx.ui.custom<{ result?: BetterResult; error?: unknown }>((tui, theme, _keybindings, done) => {
+/** Rejects with Cancelled when the user presses Esc. */
+async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: string, context: "fork" | "fresh"): Promise<BetterResult> {
+	if (ctx.mode !== "tui") return askHelper(pi, ctx.cwd, task, context, new AbortController().signal, () => {});
+	const outcome = await ctx.ui.custom<{ result: BetterResult } | { error: unknown }>((tui, theme, _keybindings, done) => {
 		const startedAt = Date.now();
 		let progress: Progress = {};
 		const loader = new CancellableLoader(tui, (s) => theme.fg("accent", s), (s) => theme.fg("muted", s), progressText(progress, 0));
+		const refresh = () => loader.setMessage(progressText(progress, Date.now() - startedAt));
 		// pi-subagents sends progress only when a tool starts or ends, so the clock ticks here; a slow command
 		// would otherwise look like a hang.
-		const clock = setInterval(() => loader.setMessage(progressText(progress, Date.now() - startedAt)), 1000);
+		const clock = setInterval(refresh, 1000);
 		const stop = () => {
 			clearInterval(clock);
 			loader.dispose();
@@ -133,85 +130,60 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
 		const onProgress = (next: Progress) => {
 			progress = next;
-			loader.setMessage(progressText(progress, Date.now() - startedAt));
+			refresh();
 		};
-		askHelper(pi, ctx.cwd, task, context, loader.signal, onProgress).then(
-			// Dispose here too: on an immediate failure done() runs before Pi stores the component, so Pi never disposes it.
-			(result) => {
-				stop();
-				done({ result });
-			},
-			(error) => {
-				stop();
-				done(error instanceof Cancelled ? {} : { error });
-			},
-		);
-		return {
-			render: (width: number) => box.render(width),
-			invalidate: () => box.invalidate(),
-			handleInput: (data: string) => loader.handleInput(data),
-			dispose: stop,
-		};
+		// Stop here too: on an immediate failure done() runs before Pi stores the component, so Pi never disposes it.
+		askHelper(pi, ctx.cwd, task, context, loader.signal, onProgress)
+			.finally(stop)
+			.then((result) => done({ result }), (error) => done({ error }));
+		return Object.assign(box, { handleInput: (data: string) => loader.handleInput(data), dispose: stop });
 	});
-	if (outcome.error) throw outcome.error;
+	if ("error" in outcome) throw outcome.error;
 	return outcome.result;
 }
 
-function plainText(result: BetterResult): string {
-	return [
-		`(1) ${result.professional}`,
-		`(2) ${result.rawMaterial}`,
-		`(3) ${result.methods}`,
-		`(4) ${result.proof}`,
-		`Improved prompt:\n\n${result.prompt}`,
-	].join("\n\n");
-}
+const promptCompletions = (prefix: string) =>
+	prefix.trim() ? null : [{ value: "", label: "<prompt>", description: "The prompt to deepen. Leave it out to deepen the task in progress." }];
 
-function promptCompletions(description: string) {
-	return (prefix: string) => (prefix.trim() ? null : [{ value: "", label: "<prompt>", description }]);
-}
-
-function lastAssistantText(messages: readonly unknown[]): string | undefined {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: string; content?: unknown };
-		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
-		const text = message.content.filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n").trim();
+function lastAssistantText(entries: readonly SessionEntry[]): string {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i];
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const text = entry.message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n").trim();
 		if (text) return text;
 	}
-	return undefined;
+	return "";
 }
 
 function failed(ctx: ExtensionContext, command: string, error: unknown): void {
-	const message = `/${command} failed: ${error instanceof Error ? error.message : String(error)}. Nothing was sent.`;
+	const message = `/${command} failed: ${error instanceof Error ? error.message : String(error)}`;
 	if (!ctx.hasUI) throw new Error(message);
 	ctx.ui.notify(message, "error");
 }
 
 /**
  * Puts the prompt in the input box for the user to read and send. A draft already there stays, below the prompt.
- * Print and JSON mode have no editor and RPC's set_editor_text gets no reply, so outside the TUI the prompt
- * (or `posted`, when given) is posted as a message instead.
+ * Print and JSON mode have no editor, and RPC's getEditorText is always empty, so a draft there would be lost;
+ * outside the TUI the prompt (with the helper's answers, when given) is posted as a message instead.
  */
-function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, posted?: { content: string; details: unknown }): void {
+function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, result?: BetterResult): void {
 	if (ctx.mode !== "tui") {
-		pi.sendMessage({ customType: "better", content: posted?.content ?? prompt, display: true, details: posted?.details });
+		const content = result
+			? `(1) ${result.professional}\n\n(2) ${result.rawMaterial}\n\n(3) ${result.methods}\n\n(4) ${result.proof}\n\nImproved prompt:\n\n${prompt}`
+			: prompt;
+		pi.sendMessage({ customType: "better", content, display: true, details: result });
 		return;
 	}
 	const draft = ctx.ui.getEditorText().trim();
 	ctx.ui.setEditorText(draft ? `${prompt}\n\n${draft}` : prompt);
 	// setEditorText doesn't repaint on its own; the notice does, so the prompt shows right away.
-	ctx.ui.notify(
-		draft
-			? "The improved prompt is in your input box, above the draft you'd typed. Edit it, then press Enter to send."
-			: "The improved prompt is in your input box. Edit it, then press Enter to send.",
-		"info",
-	);
+	ctx.ui.notify(`The improved prompt is in your input box${draft ? ", above the draft you'd typed" : ""}. Edit it, then press Enter to send.`, "info");
 }
 
 export default function (pi: ExtensionAPI) {
 	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 	let helperRegistration: { dispose(): void } | undefined;
-	let inlineRunning = false;
+	let boomerangRunning = false;
 
 	pi.on("session_shutdown", () => {
 		helperRegistration?.dispose();
@@ -220,7 +192,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("better", {
 		description: "Deepen a prompt (or the current task) with a read-only helper, then put the improved prompt in your input box",
-		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
+		getArgumentCompletions: promptCompletions,
 		handler: async (args, ctx) => {
 			const prompt = args.trim();
 			// A fork needs the session file, which Pi writes only once the conversation has history.
@@ -230,36 +202,33 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("/better has no task to deepen yet; give it a prompt: /better <prompt>", "error");
 				return;
 			}
-			let result: BetterResult | undefined;
+			let result: BetterResult;
 			try {
 				helperRegistration ??= registerHelper(pi);
 				result = await runHelper(pi, ctx, buildHelperTask({ helper: helper(), prompt, returns: "structured" }), canFork ? "fork" : "fresh");
 			} catch (error) {
+				if (error instanceof Cancelled) return ctx.ui.notify("/better cancelled; nothing was sent", "info");
 				return failed(ctx, "better", error);
 			}
-			if (!result) {
-				ctx.ui.notify("/better cancelled; nothing was sent", "info");
-				return;
-			}
 			pi.appendEntry("better", { prompt, result });
-			handOver(pi, ctx, result.prompt, { content: plainText(result), details: result });
+			handOver(pi, ctx, result.prompt, result);
 		},
 	});
 
 	pi.registerCommand("better-boomerang", {
-		description: "Deepen a prompt (or the current task) right here, then jump back and put the improved prompt in your input box",
-		getArgumentCompletions: promptCompletions("The prompt to deepen. Leave it out to deepen the task in progress."),
+		description: "Deepen a prompt (or the current task) in this chat, then jump back and put the improved prompt in your input box",
+		getArgumentCompletions: promptCompletions,
 		handler: async (args, ctx) => {
 			const prompt = args.trim();
 			if (!prompt && ctx.sessionManager.getBranch().length === 0) {
 				ctx.ui.notify("/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>", "error");
 				return;
 			}
-			if (inlineRunning) {
+			if (boomerangRunning) {
 				ctx.ui.notify("/better-boomerang is already running; wait for it to finish.", "error");
 				return;
 			}
-			inlineRunning = true;
+			boomerangRunning = true;
 			try {
 				await ctx.waitForIdle();
 				// navigateTree to a user or custom message moves to its parent and refills the input box with its text,
@@ -278,11 +247,9 @@ export default function (pi: ExtensionAPI) {
 				await ctx.waitForIdle();
 
 				const branch = ctx.sessionManager.getBranch();
-				const rewrite = branch.slice(branch.findIndex((entry) => entry.id === branchPoint) + 1);
 				let improved: string;
 				try {
-					const replies = rewrite.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
-					improved = parseMarkedPrompt(lastAssistantText(replies) ?? "");
+					improved = parseMarkedPrompt(lastAssistantText(branch.slice(branch.findIndex((entry) => entry.id === branchPoint) + 1)));
 				} catch (error) {
 					// The rewrite stays on the branch so the user can see what went wrong.
 					return failed(ctx, "better-boomerang", error);
@@ -297,7 +264,7 @@ export default function (pi: ExtensionAPI) {
 				// navigateTree keeps the same session, so this ctx and pi stay valid.
 				handOver(pi, ctx, improved);
 			} finally {
-				inlineRunning = false;
+				boomerangRunning = false;
 			}
 		},
 	});
