@@ -1,27 +1,24 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { buildHelperTask, helperExitError, parseMarkedPrompt } from "./better.ts";
+import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
+import { Loader, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { buildHelperTask, helperExitError, parseMarkedPrompt, replyProgress } from "./better.ts";
 
 const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 const WIDGET = "better";
 const SHUTDOWN = "session shutdown";
 
-interface Progress {
-	toolCount: number;
-	tool?: string;
-}
-
 class Cancelled extends Error {}
 
 /**
  * Runs the helper as a separate `pi -p` process with your normal extensions and settings, read-only tools, and a
- * copy of this chat when `sessionFile` is given. Resolves with the text of its last reply.
+ * copy of this chat when `sessionFile` is given. Passes each event of its JSON stream to `onEvent` and resolves
+ * with the text of its last reply.
  */
-function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<string> {
+function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onEvent: (event: any) => void): Promise<string> {
 	// The fork goes to a temp dir so it never shows up in /resume.
 	const sessionDir = sessionFile && mkdtempSync(join(tmpdir(), "pi-better-"));
 	const cleanUp = () => sessionDir && rmSync(sessionDir, { recursive: true, force: true });
@@ -53,7 +50,6 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		let modelError: string | undefined;
 		let stderr = "";
 		let buffered = "";
-		let toolCount = 0;
 		let timedOut = false;
 		const timer = setTimeout(() => {
 			timedOut = true;
@@ -71,11 +67,8 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 				} catch {
 					continue; // an extension in the helper may print plain text
 				}
-				if (event.type === "tool_execution_start") {
-					const detail = event.args?.command ?? event.args?.path ?? event.args?.pattern;
-					const preview = typeof detail === "string" ? detail.replace(/\s+/g, " ").slice(0, 60) : "";
-					onProgress({ toolCount: ++toolCount, tool: preview ? `${event.toolName}: ${preview}` : event.toolName });
-				} else if (event.type === "message_end" && event.message.role === "assistant") {
+				onEvent(event);
+				if (event.type === "message_end" && event.message.role === "assistant") {
 					// --mode json exits 0 even when the model call failed, so the failure is read from the message.
 					const failedTurn = event.message.stopReason === "error" || event.message.stopReason === "aborted";
 					modelError = failedTurn ? event.message.errorMessage || `request ${event.message.stopReason}` : undefined;
@@ -104,13 +97,110 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 	});
 }
 
-function progressText(progress: Progress, elapsedMs: number): string {
-	const parts = ["/better: helper is reading and rewriting"];
-	if (progress.toolCount) parts.push(`${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}`);
-	if (progress.tool) parts.push(progress.tool);
-	const seconds = Math.floor(elapsedMs / 1000);
-	parts.push(seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`);
-	return `${parts.join(" · ")} · /better-cancel stops it`;
+/** A path as you'd say it: inside the project, under ~, or else just its file name. */
+function shortPath(path: string, projectDirs: readonly string[]): string {
+	for (const dir of projectDirs) {
+		if (path === dir) return ".";
+		if (path.startsWith(`${dir}/`)) return path.slice(dir.length + 1);
+	}
+	const home = homedir();
+	if (path === home || path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+	return path.startsWith("/") ? basename(path) : path;
+}
+
+function toolLabel(name: string, args: any, projectDirs: readonly string[]): string {
+	if (name === "bash" && typeof args?.command === "string") {
+		// The first real command, skipping a `cd` into the project and variable setup.
+		const parts: string[] = args.command.trim().split(/\s*(?:&&|\|\||[|;\n])\s*/);
+		const first = parts.find((part) => !/^(cd\s|\w+=)/.test(part)) ?? parts[0];
+		return first.replace(/\s+/g, " ").replace(/(?<![\w.~$>])\/(?!dev\/)[^\s'"`]+/g, (path) => shortPath(path, projectDirs));
+	}
+	// A path names the target unless it's the whole project; then the pattern does (grep, find).
+	const path = typeof args?.path === "string" ? shortPath(args.path, projectDirs) : ".";
+	const target = path === "." ? args?.pattern : path;
+	return typeof target === "string" ? `${name} ${target}` : name;
+}
+
+const STEPS = ["gather", "answer", "prompt"];
+
+/**
+ * The /better widget, fed the helper's events: helper.md's three steps and the clock on one row, the helper's
+ * tools on the next, newest last. Always two rows, each cut to the terminal width. Loader's timer turns the
+ * spinner and repaints, which also moves the clock.
+ */
+export class HelperProgress extends Loader {
+	private readonly theme: Theme;
+	private readonly projectDirs: readonly string[];
+	private readonly startedAt: number;
+	private readonly tools: { id: string; label: string; state: "running" | "ok" | "failed" }[] = [];
+	private reply = "";
+
+	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number) {
+		super(tui, (spinner) => theme.fg("accent", spinner), (message) => message);
+		this.theme = theme;
+		this.projectDirs = projectDirs;
+		this.startedAt = startedAt;
+	}
+
+	apply(event: any): void {
+		if (event.type === "tool_execution_start") {
+			this.tools.push({ id: event.toolCallId, label: toolLabel(event.toolName, event.args, this.projectDirs), state: "running" });
+		} else if (event.type === "tool_execution_end") {
+			const tool = this.tools.find((candidate) => candidate.id === event.toolCallId);
+			if (tool) tool.state = event.isError ? "failed" : "ok";
+		} else if (event.type === "message_start" && event.message.role === "assistant") {
+			this.reply = "";
+		} else if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+			this.reply += event.assistantMessageEvent.delta;
+		}
+	}
+
+	override render(width: number): string[] {
+		const { theme } = this;
+		const { answered, writingPrompt } = replyProgress(this.reply);
+		const current = writingPrompt ? 2 : answered ? 1 : 0;
+		const step = (i: number) => {
+			const label = i === 1 && answered ? `answer ${answered}/4` : STEPS[i];
+			if (i < current) return `${theme.fg("success", "✓")} ${theme.fg("muted", label)}`;
+			if (i === current) return theme.fg("accent", `● ${label}`);
+			return theme.fg("dim", `○ ${label}`);
+		};
+		const rail = STEPS.map((_, i) => (i ? theme.fg(i <= current ? "muted" : "dim", i <= current ? " ━━━ " : " ─── ") : "") + step(i)).join("");
+		const seconds = Math.floor((Date.now() - this.startedAt) / 1000);
+		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+		// Fixed width, so the clock and the cancel hint never shift.
+		const right = `${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", " · /better-cancel")} `;
+		const head = ` ${this.getRenderedIndicator()} ${theme.fg("accent", "/better")}  `;
+		const room = width - visibleWidth(right) - 1;
+		const left = visibleWidth(head + rail) <= room ? head + rail : head + step(current);
+		const top = left + " ".repeat(Math.max(1, room + 1 - visibleWidth(left))) + right;
+
+		const failed = this.tools.filter((tool) => tool.state === "failed").length;
+		const count = `${this.tools.length} tool${this.tools.length === 1 ? "" : "s"}${failed ? ` · ${failed} failed` : ""}`;
+		const chip = ({ label, state }: (typeof this.tools)[number]) => {
+			const text = truncateToWidth(label, 28, "…");
+			if (state === "running") return `${theme.fg("muted", "•")} ${text}`;
+			return `${state === "ok" ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${theme.fg("muted", text)}`;
+		};
+		let bottom = `   ${theme.fg("dim", "no tools yet")}`;
+		if (this.tools.length) {
+			// The newest tools that fit, oldest dropped first.
+			const space = width - 3 - count.length - 3;
+			const shown: string[] = [];
+			for (let i = this.tools.length - 1; i >= 0; i--) {
+				const next = chip(this.tools[i]);
+				if (visibleWidth([next, ...shown].join("  ")) > space) break;
+				shown.unshift(next);
+			}
+			const trail = shown.length ? shown.join("  ") : truncateToWidth(chip(this.tools.at(-1)!), Math.max(space, 0), "…");
+			bottom = `   ${trail}${" ".repeat(Math.max(1, space + 2 - visibleWidth(trail)))}${theme.fg("dim", count)} `;
+		}
+		return [truncateToWidth(top, width, "…"), truncateToWidth(bottom, width, "…")];
+	}
+
+	dispose(): void {
+		this.stop();
+	}
 }
 
 const promptCompletions = (prefix: string) =>
@@ -178,20 +268,16 @@ export default function (pi: ExtensionAPI) {
 			}
 			const run = new AbortController();
 			helperRun = run;
-			const startedAt = Date.now();
-			let progress: Progress = { toolCount: 0 };
-			const show = () => {
-				// Abort first: after session_shutdown, reading ctx.mode throws, and the timer runs until the child closes.
-				if (!run.signal.aborted && ctx.mode === "tui") ctx.ui.setWidget(WIDGET, [ctx.ui.theme.fg("muted", progressText(progress, Date.now() - startedAt))]);
-			};
-			show();
-			const clock = setInterval(show, 1000);
+			let widget: HelperProgress | undefined;
+			if (ctx.mode === "tui") {
+				// The helper reports the project by its real path (/private/tmp on macOS for /tmp).
+				const projectDirs = [ctx.cwd, realpathSync(ctx.cwd)];
+				const startedAt = Date.now();
+				ctx.ui.setWidget(WIDGET, (tui, theme) => (widget = new HelperProgress(tui, theme, projectDirs, startedAt)));
+			}
 			const finished = (async () => {
 				try {
-					const reply = await askHelper(ctx.cwd, fork, buildHelperTask(helper(), prompt), run.signal, (next) => {
-						progress = next;
-						show();
-					});
+					const reply = await askHelper(ctx.cwd, fork, buildHelperTask(helper(), prompt), run.signal, (event) => widget?.apply(event));
 					let improved: string;
 					try {
 						improved = parseMarkedPrompt(reply);
@@ -209,7 +295,6 @@ export default function (pi: ExtensionAPI) {
 					if (error instanceof Cancelled) ctx.ui.notify("/better cancelled; nothing was sent", "info");
 					else failed(ctx, "better", error);
 				} finally {
-					clearInterval(clock);
 					helperRun = undefined;
 					if (run.signal.reason !== SHUTDOWN) ctx.ui.setWidget(WIDGET, undefined);
 				}
