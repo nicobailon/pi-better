@@ -1,6 +1,6 @@
 # How pi-better works
 
-Both commands send the same task: [helper.md](../helper.md) (Felix Rieseberg's "Depth" prompt plus how to gather the raw material), then the prompt to deepen, then a request to end the reply with the rewritten prompt between `<improved-prompt>` and `</improved-prompt>`. They differ in who answers it.
+Both commands send the same task: [helper.md](../helper.md) (Felix Rieseberg's "Depth" prompt, opened with an instruction to read the code and files first without asking, plus how to keep searches quick), then the prompt to deepen, then a request to end the reply with the rewritten prompt between `<improved-prompt>` and `</improved-prompt>`. They differ in who answers it.
 
 ```text
 /better <prompt>                                 /better-boomerang <prompt>

@@ -4,6 +4,7 @@
 
 ### Highlights
 
+- The helper's prompt now opens by telling it to find and read the code, files, docs and logs the request touches before answering, without asking you anything. Felix's four questions follow word for word.
 - While `/better` works, two rows above your input box show which of the helper's three steps it's on (gather, answer n/4, prompt) and its latest tools with ✓ or ✗, with paths shortened. They keep the same height, the time and `/better-cancel` stay in place, and every row fits the terminal's width.
 - The README now opens with Felix Rieseberg's "Depth" prompt from [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth), the method every rewrite follows, and credits him. It also shows a real before-and-after and compares the three ways to run the prompt.
 - `/better <prompt>` now puts the improved prompt in your input box, so you read it and press Enter yourself. The box with fire, /boomerang, tweak, edit, why and cancel is gone, so pi-boomerang is no longer used; edit the prompt in your input box instead.
