@@ -12,7 +12,7 @@ and tools they would use; (4) say what, other than you or me, would show the res
 rewrite my prompt to ask for exactly that.
 ```
 
-pi-better sends this prompt with one change: "this task" becomes "this task/plan request". It adds instructions to read the real files before answering, and never to start the work itself ([helper.md](helper.md)).
+pi-better sends this prompt with two changes: it opens with "First, without asking me anything, find and read the code, files, docs and logs this touches, so your answers rest on them.", and "this task" becomes "this task/plan request". It adds instructions to keep searches quick and never to start the work itself ([helper.md](helper.md)).
 
 ## Why this exists
 
