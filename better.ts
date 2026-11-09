@@ -20,10 +20,12 @@ export function buildHelperTask(helper: string, prompt: string): string {
 
 /** The prompt in the last marked block of a reply to a task from buildHelperTask. */
 export function parseMarkedPrompt(reply: string): string {
-	const start = reply.lastIndexOf(OPEN);
 	const end = reply.lastIndexOf(CLOSE);
-	if (start < 0 || end < start) throw new Error(`The reply has no ${OPEN} … ${CLOSE} block.`);
-	const prompt = reply.slice(start + OPEN.length, end).trim();
+	// The opening tag is on a line of its own; the prompt itself may mention the tag inline.
+	const before = `\n${reply.slice(0, Math.max(end, 0))}`;
+	const start = before.lastIndexOf(`\n${OPEN}\n`);
+	if (end < 0 || start < 0) throw new Error(`The reply has no ${OPEN} … ${CLOSE} block.`);
+	const prompt = before.slice(start + OPEN.length + 2).trim();
 	if (!prompt) throw new Error(`The reply's ${OPEN} block is empty.`);
 	return prompt;
 }
