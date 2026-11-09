@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { buildHelperTask, parseMarkedPrompt } from "./better.ts";
 
@@ -23,22 +23,34 @@ class Cancelled extends Error {}
  */
 function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onProgress: (progress: Progress) => void): Promise<string> {
 	// The fork goes to a temp dir so it never shows up in /resume.
-	const sessionDir = mkdtempSync(join(tmpdir(), "pi-better-"));
+	const sessionDir = sessionFile && mkdtempSync(join(tmpdir(), "pi-better-"));
+	const cleanUp = () => sessionDir && rmSync(sessionDir, { recursive: true, force: true });
 	const args = [
 		"--mode", "json", "-p",
-		...(sessionFile ? ["--fork", sessionFile, "--session-dir", sessionDir] : ["--no-session"]),
+		...(sessionDir ? ["--fork", sessionFile, "--session-dir", sessionDir] : ["--no-session"]),
 		"--model", HELPER_MODEL, "--thinking", "high",
 		// No edit or write; bash stays for read-only searches and experiments, and helper.md forbids writes.
 		"--tools", "read,grep,find,ls,bash", "--no-skills",
 		"--append-system-prompt", "You read and rewrite. Never edit files, start the work, or launch anything.",
 		task,
 	];
-	// Pi's own subagent example launches the same way: rerun this Pi's CLI script, else `pi` from PATH.
+	// Same launch as Pi's subagent example (getPiInvocation): rerun this Pi's CLI script; a Bun-compiled pi
+	// is its own executable; otherwise `pi` from PATH.
 	const script = process.argv[1];
-	const [command, ...prefix] = script && existsSync(script) ? [process.execPath, script] : ["pi"];
-	const child = spawn(command, [...prefix, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+	const [command, ...prefix] =
+		script && !script.startsWith("/$bunfs/root/") && existsSync(script) ? [process.execPath, script]
+		: /^(node|bun)(\.exe)?$/.test(basename(process.execPath).toLowerCase()) ? ["pi"]
+		: [process.execPath];
+	let child: ReturnType<typeof spawn>;
+	try {
+		child = spawn(command, [...prefix, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+	} catch (error) {
+		cleanUp();
+		throw error;
+	}
 	return new Promise((resolve, reject) => {
 		let reply = "";
+		let modelError: string | undefined;
 		let stderr = "";
 		let buffered = "";
 		let toolCount = 0;
@@ -49,7 +61,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		}, HELPER_TIMEOUT_MS);
 		const onAbort = () => child.kill();
 		signal.addEventListener("abort", onAbort, { once: true });
-		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+		child.stdout!.setEncoding("utf8").on("data", (chunk: string) => {
 			const lines = (buffered + chunk).split("\n");
 			buffered = lines.pop()!;
 			for (const line of lines) {
@@ -64,16 +76,19 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 					const preview = typeof detail === "string" ? detail.replace(/\s+/g, " ").slice(0, 60) : "";
 					onProgress({ toolCount: ++toolCount, tool: preview ? `${event.toolName}: ${preview}` : event.toolName });
 				} else if (event.type === "message_end" && event.message.role === "assistant") {
+					// --mode json exits 0 even when the model call failed, so the failure is read from the message.
+					const failedTurn = event.message.stopReason === "error" || event.message.stopReason === "aborted";
+					modelError = failedTurn ? event.message.errorMessage || `request ${event.message.stopReason}` : undefined;
 					const text = event.message.content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n");
 					if (text.trim()) reply = text;
 				}
 			}
 		});
-		child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+		child.stderr!.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
 		const settle = (error?: Error) => {
 			clearTimeout(timer);
 			signal.removeEventListener("abort", onAbort);
-			rmSync(sessionDir, { recursive: true, force: true });
+			cleanUp();
 			if (error) reject(error);
 			else resolve(reply);
 		};
@@ -82,6 +97,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 			if (signal.aborted) return settle(new Cancelled());
 			if (timedOut) return settle(new Error("The helper timed out after 20 minutes"));
 			if (code !== 0) return settle(new Error(`The helper exited with code ${code}: ${stderr.trim().split("\n").slice(-3).join(" ")}`));
+			if (modelError) return settle(new Error(`The helper's model call failed: ${modelError}`));
 			settle();
 		});
 	});
@@ -164,7 +180,8 @@ export default function (pi: ExtensionAPI) {
 			const startedAt = Date.now();
 			let progress: Progress = { toolCount: 0 };
 			const show = () => {
-				if (ctx.mode === "tui" && !run.signal.aborted) ctx.ui.setWidget(WIDGET, [ctx.ui.theme.fg("muted", progressText(progress, Date.now() - startedAt))]);
+				// Abort first: after session_shutdown, reading ctx.mode throws, and the timer runs until the child closes.
+				if (!run.signal.aborted && ctx.mode === "tui") ctx.ui.setWidget(WIDGET, [ctx.ui.theme.fg("muted", progressText(progress, Date.now() - startedAt))]);
 			};
 			show();
 			const clock = setInterval(show, 1000);

@@ -71,6 +71,7 @@ Outside the interactive terminal (print, JSON or RPC mode) there's no input box 
 ## Troubleshooting
 
 - "/better failed: The helper exited with code …": the text after it is the end of the helper's error output, for example an unknown model.
+- "/better failed: The helper's model call failed: …": the model returned an error, for example a rate limit or an auth problem.
 - "/better failed: The reply has no `<improved-prompt>` … block": the helper finished without the marked prompt; run `/better` again.
 
 ## Development
