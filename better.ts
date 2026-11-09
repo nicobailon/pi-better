@@ -1,47 +1,19 @@
-export interface BetterResult {
-	professional: string;
-	rawMaterial: string;
-	methods: string;
-	proof: string;
-	prompt: string;
-}
-
 const FIELDS = ["professional", "rawMaterial", "methods", "proof", "prompt"] as const;
 
+export type BetterResult = Record<(typeof FIELDS)[number], string>;
+
+// pi-subagents checks structured_output against this schema, so a blank field ("\S" also rejects whitespace)
+// makes the helper retry instead of finishing.
 export const RESULT_SCHEMA = {
 	type: "object",
-	properties: Object.fromEntries(FIELDS.map((field) => [field, { type: "string", minLength: 1 }])),
+	properties: Object.fromEntries(FIELDS.map((field) => [field, { type: "string", pattern: "\\S" }])),
 	required: [...FIELDS],
 	additionalProperties: false,
 };
 
-export function parseBetterResult(value: unknown): BetterResult {
-	if (!value || typeof value !== "object" || Array.isArray(value)) {
-		throw new Error(`The helper returned ${JSON.stringify(value)}, not an object with ${FIELDS.join(", ")}.`);
-	}
-	const record = value as Record<string, unknown>;
-	for (const field of FIELDS) {
-		const text = record[field];
-		if (typeof text !== "string" || !text.trim()) {
-			throw new Error(`The helper's result has no "${field}" text.`);
-		}
-	}
-	return {
-		professional: (record.professional as string).trim(),
-		rawMaterial: (record.rawMaterial as string).trim(),
-		methods: (record.methods as string).trim(),
-		proof: (record.proof as string).trim(),
-		prompt: (record.prompt as string).trim(),
-	};
-}
-
-export interface TaskInput {
-	/** The method the helper follows (helper.md). */
-	helper: string;
-	/** The prompt from `/better <prompt>`; empty means "deepen the current task". */
-	prompt: string;
-	/** "structured": a helper subagent returns through structured_output. "marked": the main agent ends its reply with a marked block. */
-	returns: "structured" | "marked";
+/** Trims a result that pi-subagents has already checked against RESULT_SCHEMA. */
+export function trimResult(result: BetterResult): BetterResult {
+	return Object.fromEntries(FIELDS.map((field) => [field, result[field].trim()])) as BetterResult;
 }
 
 const OPEN = "<improved-prompt>";
@@ -63,17 +35,15 @@ Give answers (1) to (4) in your reply, then end it with the rewritten prompt, co
 
 ${OPEN}
 the rewritten prompt
-${CLOSE}
+${CLOSE}`;
 
-Don't carry the prompt out: it is sent as the user's next message once this reply is done.`;
-
-export function buildHelperTask({ helper, prompt, returns }: TaskInput): string {
-	const parts = [helper.trim()];
-	parts.push(prompt.trim()
-		? `## Prompt to deepen\n\n${prompt.trim()}`
-		: "## Prompt to deepen\n\nNone given: deepen the task currently in progress in the conversation so far.");
-	parts.push(returns === "structured" ? STRUCTURED_RETURN : MARKED_RETURN);
-	return parts.join("\n\n");
+/** `prompt` is the command's trimmed argument; empty means "deepen the current task". */
+export function buildHelperTask({ helper, prompt, returns }: { helper: string; prompt: string; returns: "structured" | "marked" }): string {
+	return [
+		helper.trim(),
+		`## Prompt to deepen\n\n${prompt || "None given: deepen the task in progress in the conversation so far, including any feedback the user gave on work already done."}`,
+		returns === "structured" ? STRUCTURED_RETURN : MARKED_RETURN,
+	].join("\n\n");
 }
 
 /** The prompt in the last marked block of a reply built with `returns: "marked"`. */

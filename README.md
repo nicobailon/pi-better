@@ -25,11 +25,11 @@ pi-better lives in `~/.pi/agent/extensions/pi-better`, and Pi loads it from ther
 
 ### `/better`: rewrite with a helper
 
-While the helper works you see its progress; Esc cancels it. When it's done the improved prompt is in your input box; read it, change it if you like, and press Enter to send it. Nothing is sent until you do. If you'd already typed something there, it stays, below the improved prompt. If the helper fails or returns something malformed, your input box is left alone and you get an error.
+While the helper works you see its progress; Esc cancels it. When it's done the improved prompt is in your input box; read it, change it if you like, and press Enter to send it. Nothing is sent until you do. If you'd already typed something there, it stays, below the improved prompt. If the helper fails, your input box is left alone and you get an error.
 
 ### `/better-boomerang`: rewrite here, then jump back
 
-No helper: the agent in this chat does the rewrite itself, with everything it already knows. It can read and run commands like any turn here, but it's told only to read and rewrite, and to end with the prompt in a marked block. Then pi-better jumps the chat back to where the rewrite started (no summary) and puts the improved prompt in your input box for you to send. The rewrite turn leaves the chat's context but stays in `/tree`. You can keep typing while the rewrite runs; whatever you typed stays in the box, below the improved prompt. If the block is missing, the chat doesn't jump back, you get an error, and the rewrite stays in the chat so you can see what happened.
+No helper: the agent in this chat does the rewrite itself, with everything it already knows. It can read and run commands like any turn here, but it's told only to read and rewrite. Then pi-better jumps the chat back to where the rewrite started (no summary) and puts the improved prompt in your input box for you to send. The rewrite turn leaves the chat's context but stays in `/tree`. You can keep typing while the rewrite runs; whatever you typed stays in the box, below the improved prompt. If the reply has no `<improved-prompt>` block, the chat doesn't jump back, you get an error, and the rewrite stays in the chat so you can see what happened.
 
 ## How it works
 
@@ -47,22 +47,14 @@ No helper: the agent in this chat does the rewrite itself, with everything it al
 │ reads the real material, answers (1)–(4),      │   │ started; the rewrite stays in /tree       │
 │ returns a fixed schema                         │   └──────────────────┬────────────────────────┘
 └────────┬───────────────────────────────────────┘                      │ block missing → error,
-         │ bad shape → error, nothing sent                              │ nothing sent
+         │ fails → error, nothing sent                                  │ nothing sent
          ▼                                                              ▼
   improved prompt in your input box, above anything you'd typed; you press Enter to send
 ```
 
 The helper runs on `pi-claude/claude-opus-5-5` with high thinking. pi-better registers it with pi-subagents on first use and removes it when the session ends. Every rewrite, including the helper's four answers, is also stored as a session entry the model never sees.
 
-With `/better`, your conversation only gains the message you send, and earlier history never changes, so the prompt cache stays warm:
-
-```
-chat before   [ … earlier messages … ]
-chat after    [ … earlier messages … ] + your one message
-              the helper's work stays outside the chat
-```
-
-`/better-boomerang` does its rewrite in this chat, then jumps back, so the chat's context afterwards is the same: earlier messages plus your one message. The rewrite turn itself was one extra turn on top of the cached history.
+Either way, the chat afterwards holds the earlier messages plus the one you send, and earlier history never changes, so the prompt cache stays warm. `/better-boomerang` costs one extra turn on top of the cached history.
 
 Outside the interactive terminal (print, JSON or RPC mode) there's no input box pi-better can rely on, so `/better` posts the helper's answers and the prompt as a message and stops; `/better-boomerang` posts the prompt.
 
@@ -70,13 +62,13 @@ Outside the interactive terminal (print, JSON or RPC mode) there's no input box 
 
 - The helper can't ask you questions while it works; you're waiting on it, so it decides from what it can read.
 - The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; `helper.md` tells it not to.
-- In a new session with no history yet, there's nothing to fork: each command needs a prompt.
+- In a new session with no history yet, there's no task to deepen, so each command needs a prompt.
 
 ## Troubleshooting
 
 - "pi-subagents didn't register the helper agent" or "didn't pick up the request": load pi-subagents, then `/reload`.
 - "pi-subagents refused the helper agent": usually another agent is already named `pi-better-helper`; rename or remove it.
-- "The helper failed: …": the text after it comes from pi-subagents (timeout after 20 minutes, unknown agent or model, and so on).
+- "The helper failed: …" or "The helper timed out: …": the text after it comes from pi-subagents (unknown agent or model, the 20-minute limit, and so on).
 
 ## Development
 

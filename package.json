@@ -1,7 +1,7 @@
 {
   "name": "pi-better",
   "version": "0.1.0",
-  "description": "/better: a forked helper deepens your prompt and puts it in your input box for you to send",
+  "description": "/better and /better-boomerang deepen your prompt and put it in your input box for you to send",
   "type": "module",
   "private": true,
   "license": "MIT",
