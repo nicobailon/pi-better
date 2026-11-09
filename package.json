@@ -1,7 +1,7 @@
 {
   "name": "pi-better",
   "version": "0.1.0",
-  "description": "/better and /better-boomerang deepen your prompt and put it in your input box for you to send",
+  "description": "/better rewrites your prompt with Felix Rieseberg's \"Depth\" prompt, using your real code and files, and puts it in your input box",
   "type": "module",
   "private": true,
   "license": "MIT",
