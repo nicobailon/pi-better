@@ -45,3 +45,27 @@ test("the /better widget keeps the same height and fits the width in every frame
 		}
 	}
 });
+
+test("each tool shows as one short line: the real command or path, shortened to the project, ~ or a file name", () => {
+	const project = "/private/tmp/pb-rec/pi-better";
+	const cases: [string, object, string][] = [
+		["bash", { command: `cd ${project} && git log --oneline -5 && ls -la` }, "git log --oneline -5"],
+		["bash", { command: "W=/p; GIT_PAGER=cat git -C $W log | head -5" }, "git -C $W log"],
+		["bash", { command: "grep -E 'foo|bar' f" }, "grep -E 'foo|bar' f"],
+		["bash", { command: "curl -s https://ex.com/a/b" }, "curl -s https://ex.com/a/b"],
+		["bash", { command: "awk '/^##/' README.md" }, "awk '/^##/' README.md"],
+		["bash", { command: `cat ${project}/docs/a.md /var/folders/hn/T/b.png` }, "cat docs/a.md b.png"],
+		["read", { path: `${project}/index.ts` }, "read index.ts"],
+		["grep", { pattern: "a\nb\tc", path: project }, "grep a b c"],
+	];
+	for (const [toolName, args, label] of cases) {
+		const widget = new HelperProgress({ requestRender() {} } as any, theme, [project], Date.now());
+		try {
+			widget.apply({ type: "tool_execution_start", toolCallId: "1", toolName, args });
+			const tools = plain(widget.render(200)[1]);
+			assert.ok(tools.startsWith(`   • ${label}  `), `${toolName}: ${tools}`);
+		} finally {
+			widget.dispose();
+		}
+	}
+});

@@ -109,16 +109,21 @@ function shortPath(path: string, projectDirs: readonly string[]): string {
 }
 
 function toolLabel(name: string, args: any, projectDirs: readonly string[]): string {
+	let label = name;
 	if (name === "bash" && typeof args?.command === "string") {
-		// The first real command, skipping a `cd` into the project and variable setup.
-		const parts: string[] = args.command.trim().split(/\s*(?:&&|\|\||[|;\n])\s*/);
-		const first = parts.find((part) => !/^(cd\s|\w+=)/.test(part)) ?? parts[0];
-		return first.replace(/\s+/g, " ").replace(/(?<![\w.~$>])\/(?!dev\/)[^\s'"`]+/g, (path) => shortPath(path, projectDirs));
+		// The first real command: split at &&, ||, |, ; and newlines outside quotes, then skip a `cd` into the
+		// project and variable setup.
+		const parts: string[] = (args.command.match(/(?:'[^']*'|"[^"]*"|(?<!&)&(?!&)|[^'"|;&\n])+/g) ?? []).map((part: string) => part.trim().replace(/^(\w+=\S*\s+)+/, ""));
+		const first = parts.find((part) => part && !/^(cd\s|\w+=\S*$)/.test(part)) ?? "";
+		label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (path) => shortPath(path, projectDirs));
+	} else {
+		// A path names the target unless it's the whole project; then the pattern does (grep, find).
+		const path = typeof args?.path === "string" ? shortPath(args.path, projectDirs) : ".";
+		const target = path === "." ? args?.pattern : path;
+		if (typeof target === "string") label = `${name} ${target}`;
 	}
-	// A path names the target unless it's the whole project; then the pattern does (grep, find).
-	const path = typeof args?.path === "string" ? shortPath(args.path, projectDirs) : ".";
-	const target = path === "." ? args?.pattern : path;
-	return typeof target === "string" ? `${name} ${target}` : name;
+	// One row: a newline or tab in a command or pattern would make the widget taller.
+	return label.replace(/[\s\x00-\x1f\x7f]+/g, " ").trim() || name;
 }
 
 const STEPS = ["gather", "answer", "prompt"];
@@ -266,12 +271,13 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("/better is already running; /better-cancel stops it.", "error");
 				return;
 			}
+			// The helper reports the project by its real path (/private/tmp on macOS for /tmp). Resolved before the run
+			// is registered, so a deleted working folder fails here instead of leaving /better stuck "already running".
+			const projectDirs = [ctx.cwd, realpathSync(ctx.cwd)];
 			const run = new AbortController();
 			helperRun = run;
 			let widget: HelperProgress | undefined;
 			if (ctx.mode === "tui") {
-				// The helper reports the project by its real path (/private/tmp on macOS for /tmp).
-				const projectDirs = [ctx.cwd, realpathSync(ctx.cwd)];
 				const startedAt = Date.now();
 				ctx.ui.setWidget(WIDGET, (tui, theme) => (widget = new HelperProgress(tui, theme, projectDirs, startedAt)));
 			}
