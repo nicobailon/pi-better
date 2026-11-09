@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { buildHelperTask, parseMarkedPrompt } from "./better.ts";
+import { buildHelperTask, helperExitError, parseMarkedPrompt } from "./better.ts";
 
 const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
@@ -93,11 +93,12 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 			else resolve(reply);
 		};
 		child.on("error", (error) => settle(new Error(`Couldn't start pi for the helper: ${error.message}`)));
-		child.on("close", (code) => {
+		child.on("close", (code, exitSignal) => {
 			if (signal.aborted) return settle(new Cancelled());
 			if (timedOut) return settle(new Error("The helper timed out after 20 minutes"));
-			if (code !== 0) return settle(new Error(`The helper exited with code ${code}: ${stderr.trim().split("\n").slice(-3).join(" ")}`));
+			if (code !== 0) return settle(new Error(helperExitError(code, exitSignal, stderr)));
 			if (modelError) return settle(new Error(`The helper's model call failed: ${modelError}`));
+			if (!reply.trim()) return settle(new Error("The helper finished without replying"));
 			settle();
 		});
 	});
@@ -191,7 +192,16 @@ export default function (pi: ExtensionAPI) {
 						progress = next;
 						show();
 					});
-					const improved = parseMarkedPrompt(reply);
+					let improved: string;
+					try {
+						improved = parseMarkedPrompt(reply);
+					} catch (error) {
+						// Keep the reply, so the user can see what the helper said instead of the marked prompt.
+						const file = join(tmpdir(), `pi-better-reply-${Date.now()}.md`);
+						writeFileSync(file, reply);
+						pi.appendEntry("better", { prompt, reply });
+						throw new Error(`${(error as Error).message} The helper's whole reply is in ${file}`);
+					}
 					pi.appendEntry("better", { prompt, improved, reply });
 					handOver(pi, ctx, improved, reply);
 				} catch (error) {

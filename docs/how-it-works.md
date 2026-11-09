@@ -53,13 +53,16 @@ Neither command changes earlier history, and your conversation only gains the me
 | `/better failed: Couldn't start pi for the helper: …` | the `pi` command couldn't be launched |
 | `/better failed: The helper timed out after 20 minutes` | the helper hit its limit; try a narrower prompt |
 | `/better failed: The helper exited with code …` | the text after it is the end of the helper's error output, for example an unknown model |
+| `/better failed: The helper exited with code … without printing an error` | the helper stopped with no error output; code 143 means something sent it SIGTERM |
+| `/better failed: The helper was stopped by …` | something outside pi-better killed the helper with that signal, for example `SIGKILL` |
+| `/better failed: The helper finished without replying` | the helper exited normally but wrote no reply text; run the command again |
 | `/better failed: The helper's model call failed: …` | the model returned an error, for example a rate limit or a sign-in problem |
-| `/better failed: The reply has no <improved-prompt> … </improved-prompt> block.` | the reply ended without the marked prompt; run the command again |
-| `/better failed: The reply's <improved-prompt> block is empty.` | same, with an empty block |
+| `/better failed: The reply has no <improved-prompt> … </improved-prompt> block. The helper's whole reply is in …` | the reply ended without the marked prompt; open the file named at the end to see what the helper wrote, then run the command again |
+| `/better failed: The reply's <improved-prompt> block is empty. The helper's whole reply is in …` | same, with an empty block |
 | `/better-boomerang is already running; wait for it to finish.` | one boomerang at a time |
 | `/better-boomerang failed: another extension cancelled the jump back to where the rewrite started` | another extension blocked the tree navigation; the rewrite is still in the chat |
 
-`/better-boomerang` reports a missing or empty block with the same text as `/better`, and leaves the rewrite in the chat so you can see what happened.
+`/better` also saves that reply as a `better` session entry. `/better-boomerang` reports a missing or empty block without the file part, and leaves the rewrite in the chat so you can see what happened.
 
 ## Limitations
 
