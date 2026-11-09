@@ -30,7 +30,7 @@ const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 interface Progress {
 	toolCount?: number;
 	currentTool?: string;
-	durationMs?: number;
+	currentToolArgs?: string;
 }
 
 type Context = "fork" | "fresh";
@@ -48,7 +48,7 @@ function askHelper(pi: ExtensionAPI, cwd: string, task: string, context: Context
 				if (data?.requestId === requestId) started = true;
 			}),
 			pi.events.on(UPDATE_EVENT, (data: any) => {
-				if (data?.requestId === requestId) onProgress({ toolCount: data.toolCount, currentTool: data.currentTool, durationMs: data.durationMs });
+				if (data?.requestId === requestId) onProgress({ toolCount: data.toolCount, currentTool: data.currentTool, currentToolArgs: data.currentToolArgs });
 			}),
 			pi.events.on(RESPONSE_EVENT, (data: any) => {
 				if (data?.requestId !== requestId) return;
@@ -100,11 +100,15 @@ function registerHelper(pi: ExtensionAPI): { dispose(): void } {
 	return request.result.registration;
 }
 
-function progressText(progress: Progress): string {
+function progressText(progress: Progress, elapsedMs: number): string {
 	const parts = ["Helper is reading and rewriting"];
 	if (progress.toolCount) parts.push(`${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}`);
-	if (progress.currentTool) parts.push(progress.currentTool);
-	if (progress.durationMs) parts.push(`${Math.round(progress.durationMs / 1000)}s`);
+	if (progress.currentTool) {
+		const args = progress.currentToolArgs?.replace(/\s+/g, " ").trim();
+		parts.push(args ? `${progress.currentTool}: ${args.length > 60 ? `${args.slice(0, 59)}…` : args}` : progress.currentTool);
+	}
+	const seconds = Math.floor(elapsedMs / 1000);
+	parts.push(seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`);
 	return `${parts.join(" · ")} · Esc cancels`;
 }
 
@@ -113,19 +117,32 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 		return await askHelper(pi, ctx.cwd, task, context, new AbortController().signal, () => {});
 	}
 	const outcome = await ctx.ui.custom<{ result?: BetterResult; error?: unknown }>((tui, theme, _keybindings, done) => {
-		const loader = new CancellableLoader(tui, (s) => theme.fg("accent", s), (s) => theme.fg("muted", s), progressText({}));
+		const startedAt = Date.now();
+		let progress: Progress = {};
+		const loader = new CancellableLoader(tui, (s) => theme.fg("accent", s), (s) => theme.fg("muted", s), progressText(progress, 0));
+		// pi-subagents sends progress only when a tool starts or ends, so the clock ticks here; a slow command
+		// would otherwise look like a hang.
+		const clock = setInterval(() => loader.setMessage(progressText(progress, Date.now() - startedAt)), 1000);
+		const stop = () => {
+			clearInterval(clock);
+			loader.dispose();
+		};
 		const box = new Container();
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
 		box.addChild(loader);
 		box.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
-		askHelper(pi, ctx.cwd, task, context, loader.signal, (progress) => loader.setMessage(progressText(progress))).then(
+		const onProgress = (next: Progress) => {
+			progress = next;
+			loader.setMessage(progressText(progress, Date.now() - startedAt));
+		};
+		askHelper(pi, ctx.cwd, task, context, loader.signal, onProgress).then(
 			// Dispose here too: on an immediate failure done() runs before Pi stores the component, so Pi never disposes it.
 			(result) => {
-				loader.dispose();
+				stop();
 				done({ result });
 			},
 			(error) => {
-				loader.dispose();
+				stop();
 				done(error instanceof Cancelled ? {} : { error });
 			},
 		);
@@ -133,7 +150,7 @@ async function runHelper(pi: ExtensionAPI, ctx: ExtensionCommandContext, task: s
 			render: (width: number) => box.render(width),
 			invalidate: () => box.invalidate(),
 			handleInput: (data: string) => loader.handleInput(data),
-			dispose: () => loader.dispose(),
+			dispose: stop,
 		};
 	});
 	if (outcome.error) throw outcome.error;

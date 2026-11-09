@@ -8,6 +8,7 @@ I want a deeper version of this task/plan request, not a bigger one. Before rewr
 ## How to work
 
 1. Gather the raw material first. Before you answer anything, open the rawest sources the request touches: read the code, files, screenshots, logs and docs it names or implies, and run read-only searches. Don't rely on summaries in the conversation when the source is reachable.
+   Keep every command quick; the user is watching a spinner until you finish. Search the project and the paths the request names, not whole home, session-log or cache directories (`~/.pi/agent/sessions` alone can hold tens of gigabytes). Give any command that might be slow a `timeout` of 30 seconds or less, and when one times out, narrow it instead of retrying it.
 2. Answer (1) to (4) in a few lines each, using concrete facts from what you found: file names, counts, real names of components, commands and tools that exist here.
 3. Rewrite the prompt so it asks for exactly that: the deeper version, not a bigger one. Keep the user's goal and voice, put the concrete facts in, and say what proves the result is right. Write it as the user's own request, ready to send as is.
 

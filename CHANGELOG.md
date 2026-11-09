@@ -7,6 +7,7 @@
 - `/better <prompt>` now puts the improved prompt in your input box, so you read it and press Enter yourself. The box with fire, subagent, tweak, edit and cancel is gone; edit the prompt in your input box instead.
 - New `/better-boomerang <prompt>`: the agent in this chat rewrites the prompt with everything it already knows, then the chat jumps back to where it started and the improved prompt lands in your input box. The rewrite stays in `/tree`, and no other extension is needed.
 - Anything you'd already typed in the input box stays there, below the improved prompt.
+- While the `/better` helper works, its clock keeps ticking and you see the command it's running, so a slow search no longer looks like a hang. The helper is also told to keep its searches small and give slow commands a timeout.
 - Typing a space after either command shows what its argument is for.
 - pi-better no longer uses pi-boomerang.
 - pi-better lives in `~/.pi/agent/extensions/pi-better` and Pi loads it from there automatically, with no `pi install`.
