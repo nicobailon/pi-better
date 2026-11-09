@@ -197,9 +197,9 @@ export default function (pi: ExtensionAPI) {
 						improved = parseMarkedPrompt(reply);
 					} catch (error) {
 						// Keep the reply, so the user can see what the helper said instead of the marked prompt.
+						pi.appendEntry("better", { prompt, reply });
 						const file = join(tmpdir(), `pi-better-reply-${Date.now()}.md`);
 						writeFileSync(file, reply);
-						pi.appendEntry("better", { prompt, reply });
 						throw new Error(`${(error as Error).message} The helper's whole reply is in ${file}`);
 					}
 					pi.appendEntry("better", { prompt, improved, reply });
