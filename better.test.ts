@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildHelperTask, parseMarkedPrompt } from "./better.ts";
+import { buildHelperTask, helperExitError, parseMarkedPrompt } from "./better.ts";
 
 test("buildHelperTask names the given prompt, or the current task when none is given", () => {
 	const given = buildHelperTask("METHOD", "make hover nicer");
@@ -18,4 +18,10 @@ test("a task's reply gives back the prompt in its last marked block", () => {
 	assert.equal(parseMarkedPrompt(mentionsTag), "Keep the reply when there's no `<improved-prompt>` block.");
 	assert.throws(() => parseMarkedPrompt("(1) Read the code. No block."), /no <improved-prompt>/);
 	assert.throws(() => parseMarkedPrompt("<improved-prompt>\n \n</improved-prompt>"), /empty/);
+});
+
+test("helperExitError names the signal or code, and never ends on a bare colon", () => {
+	assert.equal(helperExitError(null, "SIGKILL", ""), "The helper was stopped by SIGKILL without printing an error");
+	assert.equal(helperExitError(143, null, "  \n"), "The helper exited with code 143 without printing an error");
+	assert.equal(helperExitError(1, null, "a\nb\nc\nError: unknown model\n"), "The helper exited with code 1: b c Error: unknown model");
 });

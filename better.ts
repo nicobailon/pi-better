@@ -29,3 +29,10 @@ export function parseMarkedPrompt(reply: string): string {
 	if (!prompt) throw new Error(`The reply's ${OPEN} block is empty.`);
 	return prompt;
 }
+
+/** Why the helper process failed, from how it ended (Node gives a code or a signal) and its error output. */
+export function helperExitError(code: number | null, signal: string | null, stderr: string): string {
+	const how = code === null ? `was stopped by ${signal}` : `exited with code ${code}`;
+	const tail = stderr.trim().split("\n").slice(-3).join(" ");
+	return tail ? `The helper ${how}: ${tail}` : `The helper ${how} without printing an error`;
+}
