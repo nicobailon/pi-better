@@ -3,7 +3,7 @@ const CLOSE = "</improved-prompt>";
 
 const RETURN = `## Return
 
-Give answers (1) to (4) in your reply, then end it with the rewritten prompt, complete, between these two lines and nothing after them:
+Give answers (1) to (4) in your reply, each starting a new line with its number, like "(1)". Then end it with the rewritten prompt, complete, between these two lines and nothing after them:
 
 ${OPEN}
 the rewritten prompt
@@ -28,6 +28,16 @@ export function parseMarkedPrompt(reply: string): string {
 	const prompt = before.slice(start + OPEN.length + 2).trim();
 	if (!prompt) throw new Error(`The reply's ${OPEN} block is empty.`);
 	return prompt;
+}
+
+/**
+ * How far a reply to buildHelperTask has got, from the text written so far: `answered` is the highest of the
+ * headed answers (1) to (4), and `writingPrompt` turns true once the marked block opens on a line of its own.
+ */
+export function replyProgress(text: string): { answered: number; writingPrompt: boolean } {
+	let answered = 0;
+	for (const [, n] of text.matchAll(/^\W*\(([1-4])\)/gm)) answered = Math.max(answered, Number(n));
+	return { answered, writingPrompt: `\n${text}`.includes(`\n${OPEN}\n`) };
 }
 
 /** Why the helper process failed, from how it ended (Node gives a code or a signal) and its error output. */

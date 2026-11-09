@@ -82,7 +82,7 @@ It didn't just reword strings. It listed every error path with its line number, 
 |---|---|---|---|
 | Where it runs | in this chat | a separate read-only `pi` process with a copy of this chat | in this chat |
 | Keep chatting meanwhile | no | yes | no, but you can type your next message |
-| Watch it work | yes | no; a progress line shows the tool count, the command it's running and the time | yes |
+| Watch it work | yes | no; two rows show its step, its latest tools and the time | yes |
 | Your context afterwards | holds the four answers, the research and the rewrite | unchanged | rewinds to where it was before you ran it; the rewrite stays in `/tree` |
 | The improved prompt | in a reply, for you to copy | in your input box | in your input box |
 
@@ -100,10 +100,11 @@ Pi loads extensions from `~/.pi/agent/extensions` on its own, so run `/reload` (
 
 ## What you'll see
 
-While `/better` works, a line above your input box updates every second:
+While `/better` works, two rows above your input box show which step the helper is on (gather the material, answer the four questions, write the prompt) and its latest tools with ✓ or ✗. From a real run at 80 columns:
 
 ```text
-/better: helper is reading and rewriting · 2 tools · read: notes.md · 38s · /better-cancel stops it
+ ⠙ /better  ✓ gather ━━━ ● answer 3/4 ─── ○ prompt         29s · /better-cancel
+   ✓ ls  ✓ head -60 ~/Documents/docs/p…  ✓ git -C $W status -sb         6 tools
 ```
 
 When it's done, the improved prompt is in your input box with this notice:

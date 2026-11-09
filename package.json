@@ -8,7 +8,7 @@
   "keywords": ["pi-package"],
   "files": ["index.ts", "better.ts", "helper.md", "README.md", "CHANGELOG.md", "LICENSE"],
   "scripts": {
-    "test": "node --test better.test.ts",
+    "test": "node --test better.test.ts progress.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {
