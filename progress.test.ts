@@ -12,7 +12,7 @@ registerHooks({
 	resolve: (specifier, context, next) =>
 		next(specifier.startsWith("@earendil-works/") ? pathToFileURL(`${PI_PACKAGES}/${specifier.slice(16)}/dist/index.js`).href : specifier, context),
 });
-const { KeybindingsManager, setKeybindings, stripTerminalSequences: plain, visibleWidth } = await import("@earendil-works/pi-tui");
+const { isKeyRelease, KeybindingsManager, setKeybindings, stripTerminalSequences: plain, visibleWidth } = await import("@earendil-works/pi-tui");
 const { default: extension, HelperProgress } = await import("./index.ts");
 
 // A real helper run in a clone at /tmp/pb-rec/pi-better: four tools (bash and grep in parallel, the bash failed),
@@ -127,14 +127,14 @@ test("Esc cancels /better while the agent is idle, and goes to Pi while the agen
 		const commands: Record<string, any> = {};
 		const entries: string[] = [];
 		extension({ registerCommand: (name: string, command: any) => (commands[name] = command), on() {}, getSettings: () => ({}), appendEntry: (type: string) => entries.push(type) } as any);
-		// Pi's editor runs its app-level Esc handler, which stops the agent's run, when it doesn't need Esc itself.
+		// Every key this test presses is Esc, which Pi's editor passes to its app-level handler (stopping the agent's run).
 		let piEscapes = 0;
-		const editor = { actionHandlers: new Map(), onEscape: () => piEscapes++, handleInput(data: string) { if (data === "\x1b") this.onEscape(); } };
+		const editor = { actionHandlers: new Map(), onEscape: () => piEscapes++, handleInput() { this.onEscape(); } };
 		const tui = { getFocusedComponent: () => editor, requestRender() {} };
 		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
-		// Like Pi's TUI: the input listeners see each key first, then the focused component gets it.
+		// Like Pi's TUI: the input listeners see each key first, then the focused component gets it, minus key releases.
 		const press = (data: string) => {
-			if (!listener?.(data)?.consume) editor.handleInput(data);
+			if (!listener?.(data)?.consume && !isKeyRelease(data)) editor.handleInput(data);
 		};
 		let shown: { dispose(): void } | undefined;
 		let notified!: (message: string) => void;
@@ -159,7 +159,9 @@ test("Esc cancels /better while the agent is idle, and goes to Pi while the agen
 		assert.equal(piEscapes, 1, "while the agent is busy, Esc stops the agent as usual");
 
 		idle = true;
-		press("\x1b");
+		// A Kitty terminal's Esc press and release, arriving in one chunk.
+		press("\x1b[27u");
+		press("\x1b[27;1:3u");
 		assert.equal(await notice, "/better cancelled; nothing was sent");
 		assert.equal(piEscapes, 1);
 		assert.deepEqual(entries, []);

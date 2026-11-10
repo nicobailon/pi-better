@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable } from "node:stream";
 import type { ExtensionAPI, ExtensionContext, JsonAgentSessionEvent, SessionEntry, SessionHeader, Theme } from "@earendil-works/pi-coding-agent";
-import { getKeybindings, Loader, type TUI, type TuiAltScreen, type TuiMainScreen, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getKeybindings, isKeyRelease, Loader, type TUI, type TuiAltScreen, type TuiMainScreen, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { buildHelperTask, HELPER_ENV, helperExitError, helperModelArgs, helperToolBlock, parseMarkedPrompt, replyProgress } from "./better.ts";
 
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
@@ -163,7 +163,8 @@ export class HelperProgress extends Loader {
 		const seconds = Math.floor((Date.now() - this.startedAt) / 1000);
 		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 		// Fixed width, so the clock and the cancel hint never shift.
-		const cancel = this.escCancels() ? `${getKeybindings().getKeys("app.interrupt").join("/")} cancels` : "/better-cancel";
+		const key = getKeybindings().getKeys("app.interrupt").join("/");
+		const cancel = key && this.escCancels() ? `${key} cancels` : "/better-cancel";
 		const pad = " ".repeat(Math.max(0, "/better-cancel".length - cancel.length));
 		const right = `${pad}${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", ` · ${cancel}`)} `;
 		const room = width - visibleWidth(right) - 1;
@@ -276,21 +277,25 @@ export default function (pi: ExtensionAPI) {
 				const startedAt = Date.now();
 				// Pi's Esc stops the agent's run, and on a "!" line clears the input box; /better takes Esc only when it
 				// would do neither.
-				const escCancels = () => ctx.isIdle() && !ctx.ui.getEditorText().trimStart().startsWith("!");
+				const escCancels = () => !run.signal.aborted && ctx.isIdle() && !ctx.ui.getEditorText().trimStart().startsWith("!");
 				// Pi's two screens, which both track focus; the TUI interface widgets get doesn't expose it.
 				let tui: TuiMainScreen | TuiAltScreen | undefined;
 				ctx.ui.setWidget(WIDGET, (ui, theme) => {
 					tui = ui as TuiMainScreen | TuiAltScreen;
 					return (widget = new HelperProgress(ui, theme, projectDirs, startedAt, escCancels));
 				});
+				const cancel = () => run.abort();
 				stopListening = ctx.ui.onTerminalInput((data): undefined => {
 					const editor = tui?.getFocusedComponent() as { onEscape?: () => void } | null | undefined;
 					// Pi's editors have actionHandlers; a picker or dialog in focus keeps its own Esc.
 					if (!editor || !("actionHandlers" in editor) || !getKeybindings().matches(data, "app.interrupt") || !escCancels()) return;
+					// Kitty terminals also report Esc's release, which Pi drops before the editor. A release, or a second Esc
+					// in the same chunk, arrives before the restore below; swapping again would save `cancel` as Pi's handler.
+					if (isKeyRelease(data) || editor.onEscape === cancel) return;
 					// The key still reaches the editor, which keeps Esc for itself when autocomplete or a vim mode needs it.
 					// Only the Esc it passes on to Pi goes to /better, and only for this key press.
 					const piEscape = editor.onEscape;
-					editor.onEscape = () => run.abort();
+					editor.onEscape = cancel;
 					queueMicrotask(() => (editor.onEscape = piEscape));
 				});
 			}
