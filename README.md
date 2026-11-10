@@ -126,7 +126,7 @@ When it's done, the improved prompt is in your input box with this notice:
 The improved prompt is in your input box. Edit it, then press Enter to send.
 ```
 
-Anything you'd typed meanwhile stays in the box, below the prompt, and the notice says so. Nothing is sent until you press Enter. The helper can use `read`, `grep`, `find`, `ls` and `bash`; pi-better refuses any other tool it calls, including edit and write. It stops after 20 minutes.
+Anything you'd typed meanwhile stays in the box, below the prompt, and the notice says so. Nothing is sent until you press Enter. The helper can use `read` and `bash`, plus `grep`, `find` and `ls` when your chat has them; pi-better refuses any other tool it calls, including edit and write. It stops after 20 minutes.
 
 ## Common tasks
 

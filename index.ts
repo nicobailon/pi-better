@@ -229,7 +229,7 @@ export default function (pi: ExtensionAPI) {
 	let helperRun: AbortController | undefined;
 	let boomerangRunning = false;
 
-	if (process.env[HELPER_ENV]) pi.on("tool_call", (event) => helperToolBlock(event.toolName));
+	if (process.env[HELPER_ENV]) pi.on("tool_call", (event) => helperToolBlock(event.toolName, pi.getActiveTools()));
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (!helperRun) return;

@@ -33,10 +33,11 @@ test("the helper runs on the chat's model and thinking level unless settings pin
 	assert.throws(() => helperModelArgs(undefined, undefined, undefined), /pick one with \/model/);
 	assert.throws(() => helperModelArgs({ model: 5 }, "openai/gpt-5", "low"), /"better.model" in settings.json must be a string/);
 	assert.throws(() => helperModelArgs("opus", "openai/gpt-5", "low"), /"better" in settings.json must be an object/);
+	assert.throws(() => helperModelArgs({ thinking: "hihg" }, "openai/gpt-5", "low"), /"better.thinking" in settings.json must be one of off, minimal/);
 });
 
 test("the helper may only call read-only tools", () => {
-	for (const tool of ["read", "grep", "find", "ls", "bash"]) assert.equal(helperToolBlock(tool), undefined);
-	assert.match(helperToolBlock("edit")!.reason, /edit is off/);
-	assert.equal(helperToolBlock("subagent")?.block, true);
+	for (const tool of ["read", "grep", "find", "ls", "bash"]) assert.equal(helperToolBlock(tool, ["read", "bash"]), undefined);
+	assert.match(helperToolBlock("edit", ["read", "bash", "edit", "write"])!.reason, /edit is off\. Use read, bash\.$/);
+	assert.equal(helperToolBlock("subagent", ["read", "bash"])?.block, true);
 });
