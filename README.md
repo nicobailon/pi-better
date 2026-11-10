@@ -83,7 +83,7 @@ It listed every error path with its line number, said to cause each failure for 
 | | Type Felix's prompt yourself | `/better` | `/better-boomerang` |
 |---|---|---|---|
 | Where it runs | in this chat | a separate read-only `pi` process with a copy of this chat | in this chat |
-| Keep chatting meanwhile | no | yes | no, but you can type your next message |
+| Keep chatting meanwhile | no | yes, and you can run it while the agent is busy, when a normal message would wait in the queue | no, but you can type your next message |
 | Watch it work | yes | no; two rows show its step, its latest tools and the time | yes |
 | Your context afterwards | holds the four answers, the research and the rewrite | unchanged | rewinds to where it was before you ran it; the rewrite stays in `/tree` |
 | Model | this chat's | this chat's, reusing its prompt cache, or one you set | this chat's |
