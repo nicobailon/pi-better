@@ -8,8 +8,8 @@ Both commands send the same task: [helper.md](../helper.md) (Felix Rieseberg's "
       ▼                                                ▼
 separate `pi -p` process, in the background      this chat answers, as a hidden message
  · copy of this chat as of /better               (you watch it read and write)
- · read, grep, find, ls, bash; no edit or write        │
- · Opus 5.5, high thinking, 20-minute limit            ▼
+ · read-only: tools other than reading are refused     │
+ · the chat's model and thinking, 20-minute limit      ▼
       │                                          the chat jumps back to where it was
       ▼                                          before; the rewrite stays in /tree
       └──────────────┬─────────────────────────────────┘
@@ -20,7 +20,19 @@ separate `pi -p` process, in the background      this chat answers, as a hidden 
 
 ## `/better`
 
-**The helper is its own Pi process.** pi-better runs `pi --mode json -p` with `--model pi-claude/claude-opus-5-5 --thinking high`, `--tools read,grep,find,ls,bash` and `--no-skills`, plus a system-prompt line telling it to read and rewrite only. It loads your usual extensions and settings. It's launched the same way as Pi's own subagent example: the CLI script of the Pi you're running, the Pi binary itself when Pi is a compiled binary, or `pi` from your PATH.
+**The helper is its own Pi process.** pi-better runs `pi --mode json -p` with the chat's `--model` and `--thinking` level. It loads your usual extensions, skills and settings, and `--fork` brings back the chat's tool list, so it sends the same tools and system prompt as the chat (unless the chat was started with flags that change them; see Limitations). It's launched the same way as Pi's own subagent example: the CLI script of the Pi you're running, the Pi binary itself when Pi is a compiled binary, or `pi` from your PATH.
+
+**It reuses the chat's prompt cache.** Providers cache a request's opening (tools, then system prompt, then messages) and match it exactly, so the helper changes nothing before its own task message. Measured on `pi-claude/claude-opus-5-5`, same thinking level, run back to back:
+
+| Input tokens | read from cache | written to cache |
+|---|---|---|
+| the chat's turn | 21,247 | 16,030 |
+| helper with its own tool list and system prompt (before) | 1,651 | 17,135 |
+| helper with the chat's (now) | 36,860 | 1,352 |
+
+`"better": { "model": "…", "thinking": "…" }` in `settings.json` pins either one for the helper instead, at the cost of the cache.
+
+**It can only read.** Narrowing the helper's tool list can change the start of its request (for most models Pi puts tool changes into the opening system prompt), so it keeps every tool and pi-better refuses the calls instead: the helper process runs with `PI_BETTER_HELPER=1`, and pi-better's copy inside it blocks any tool other than `read`, `grep`, `find`, `ls` and the shell (`bash`, or `powershell` where your setup uses it), telling the model which of those it has. Pi turns on only `read` and `bash` of these by default; `grep`, `find` and `ls` are there when your chat has them.
 
 **It gets a copy of your chat, as it was when you ran `/better`.** If the session has been saved (it has once there's a message in it), the helper starts with `--fork` of the session file. The copy goes into a temporary folder that's deleted when the helper finishes, so it never shows up in `/resume`. Messages you send while it works don't reach it. In a new session with nothing saved yet, it starts fresh, so `/better` needs a prompt there.
 
@@ -42,7 +54,7 @@ Print and JSON mode have no input box, and in RPC mode pi-better can't read what
 
 ## The prompt cache
 
-Neither command changes earlier history, and your conversation only gains the message you send, so the prompt cache stays warm. `/better-boomerang` costs one extra turn on top of the cached history. `/better`'s helper is a separate conversation with its own cache.
+Neither command changes earlier history, and your conversation only gains the message you send, so the prompt cache stays warm. `/better-boomerang` costs one extra turn on top of the cached history. `/better`'s helper sends the same opening as the chat, so it reads the chat's cached history too (see [`/better`](#better)), unless `settings.json` gives it a different model or thinking level.
 
 ## Error messages
 
@@ -50,6 +62,10 @@ Neither command changes earlier history, and your conversation only gains the me
 |---|---|
 | `/better has no task to deepen yet; give it a prompt: /better <prompt>` | nothing has been saved in this session yet, so there's no task to deepen |
 | `/better is already running; /better-cancel stops it.` | one helper runs at a time |
+| `/better failed: No model is selected; pick one with /model.` | the chat has no model yet, so the helper has none to use |
+| `/better failed: "better" in settings.json must be an object like …` | `better` in `settings.json` isn't `{ "model": …, "thinking": … }` |
+| `/better failed: "better.model" in settings.json must be a string like …` | `better.model` is empty or not a string |
+| `/better failed: "better.thinking" in settings.json must be one of …` | `better.thinking` isn't one of Pi's thinking levels |
 | `/better cancelled; nothing was sent` | you ran `/better-cancel` |
 | `No /better is running.` | `/better-cancel` had nothing to stop |
 | `/better failed: Couldn't start pi for the helper: …` | the `pi` command couldn't be launched |
@@ -71,5 +87,7 @@ Neither command changes earlier history, and your conversation only gains the me
 ## Limitations
 
 - The helper can't ask you questions while it works, so it decides from what it can read.
-- The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; only [helper.md](../helper.md) tells it not to.
+- The helper keeps its shell (`bash`, or `powershell`) so it can run read-only searches and quick experiments. A shell command could still write a file; only [helper.md](../helper.md) tells it not to.
+- The refusal comes from pi-better's copy inside the helper, so it needs pi-better installed where Pi finds it on its own (`~/.pi/agent/extensions` or `pi install`). Loaded only with `-e` for one chat, the helper won't have it, and only helper.md keeps it from editing.
+- The helper gets your settings, not the flags the chat was started with. A chat started with `--append-system-prompt`, `-e`, `--no-context-files` or similar flags sends a different opening, so the helper's request misses the cache.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.

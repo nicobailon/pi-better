@@ -11,6 +11,37 @@ ${OPEN}
 the rewritten prompt
 ${CLOSE}`;
 
+export const HELPER_ENV = "PI_BETTER_HELPER";
+// The shell (bash, or powershell where a setup swaps it in) stays for read-only searches and experiments; only the
+// prompts keep it from writing.
+const HELPER_TOOLS = ["read", "grep", "find", "ls", "bash", "powershell"];
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+// The helper keeps the chat's whole tool list, so its request starts the same as the chat's and reads from the
+// provider's prompt cache; it's held to reading by refusing the other tools when they're called.
+export function helperToolBlock(toolName: string, activeTools: string[]): { block: true; reason: string } | undefined {
+	if (HELPER_TOOLS.includes(toolName)) return undefined;
+	const usable = HELPER_TOOLS.filter((tool) => activeTools.includes(tool)).join(", ");
+	return { block: true, reason: `/better's helper only reads and rewrites, so ${toolName} is off.${usable ? ` Use ${usable}.` : ""}` };
+}
+
+// By default the helper runs on the chat's model and thinking level, which the prompt cache needs. settings.json's
+// "better": { "model": "provider/id", "thinking": "high" } pins either one instead.
+export function helperModelArgs(setting: unknown, chatModel: string | undefined, chatThinking: string | undefined): string[] {
+	if (setting !== undefined && (typeof setting !== "object" || setting === null || Array.isArray(setting))) {
+		throw new Error(`"better" in settings.json must be an object like { "model": "anthropic/claude-opus-4-5", "thinking": "high" }.`);
+	}
+	const { model = chatModel, thinking = chatThinking } = (setting ?? {}) as { model?: unknown; thinking?: unknown };
+	if (typeof model !== "string" || model === "") {
+		throw new Error(model === undefined ? "No model is selected; pick one with /model." : `"better.model" in settings.json must be a string like "anthropic/claude-opus-4-5".`);
+	}
+	// Pi only warns about an unknown --thinking level, on the helper's stderr where nobody sees it.
+	if (thinking !== undefined && (typeof thinking !== "string" || !THINKING_LEVELS.includes(thinking))) {
+		throw new Error(`"better.thinking" in settings.json must be one of ${THINKING_LEVELS.join(", ")}.`);
+	}
+	return ["--model", model, ...(typeof thinking === "string" ? ["--thinking", thinking] : [])];
+}
+
 export function buildHelperTask(helper: string, prompt: string): string {
 	return [
 		helper.trim(),

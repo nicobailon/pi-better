@@ -86,6 +86,7 @@ It listed every error path with its line number, said to cause each failure for 
 | Keep chatting meanwhile | no | yes | no, but you can type your next message |
 | Watch it work | yes | no; two rows show its step, its latest tools and the time | yes |
 | Your context afterwards | holds the four answers, the research and the rewrite | unchanged | rewinds to where it was before you ran it; the rewrite stays in `/tree` |
+| Model | this chat's | this chat's, reusing its prompt cache, or one you set | this chat's |
 | The improved prompt | in a reply, for you to copy | in your input box | in your input box |
 
 Use `/better-boomerang` when you want to watch the agent research and write the prompt live, then have the chat rewind as if it never happened.
@@ -98,7 +99,11 @@ git clone https://github.com/nicobailon/pi-better ~/.pi/agent/extensions/pi-bett
 
 Pi loads extensions from `~/.pi/agent/extensions` on its own, so run `/reload` (or restart Pi) and the commands are there. To keep the folder somewhere else, run `pi install <path>` on it instead.
 
-`/better`'s helper runs on `pi-claude/claude-opus-5-5` with high thinking, a model that comes from pi-claude-bridge, so that needs to be installed and signed in. `/better-boomerang` uses whatever model the chat is on.
+`/better`'s helper runs on the chat's model and thinking level, with the chat's tools and system prompt, so its copy of your conversation is read from the provider's prompt cache instead of being processed again. To use a different model or thinking level for it, add either key to `settings.json` (`~/.pi/agent/settings.json` or the project's `.pi/settings.json`); the cache won't carry over then:
+
+```json
+"better": { "model": "anthropic/claude-opus-4-5", "thinking": "high" }
+```
 
 ## What you'll see
 
@@ -121,7 +126,7 @@ When it's done, the improved prompt is in your input box with this notice:
 The improved prompt is in your input box. Edit it, then press Enter to send.
 ```
 
-Anything you'd typed meanwhile stays in the box, below the prompt, and the notice says so. Nothing is sent until you press Enter. The helper has `read`, `grep`, `find`, `ls` and `bash`, with no edit or write tools, and stops after 20 minutes.
+Anything you'd typed meanwhile stays in the box, below the prompt, and the notice says so. Nothing is sent until you press Enter. The helper can use `read` and your shell (`bash`, or `powershell` if you use it), plus `grep`, `find` and `ls` when your chat has them; pi-better refuses any other tool it calls, including edit and write. It stops after 20 minutes.
 
 ## Common tasks
 

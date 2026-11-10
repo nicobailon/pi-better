@@ -5,9 +5,8 @@ import { basename, join } from "node:path";
 import type { Readable } from "node:stream";
 import type { ExtensionAPI, ExtensionContext, JsonAgentSessionEvent, SessionEntry, SessionHeader, Theme } from "@earendil-works/pi-coding-agent";
 import { Loader, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { buildHelperTask, helperExitError, parseMarkedPrompt, replyProgress } from "./better.ts";
+import { buildHelperTask, HELPER_ENV, helperExitError, helperModelArgs, helperToolBlock, parseMarkedPrompt, replyProgress } from "./better.ts";
 
-const HELPER_MODEL = "pi-claude/claude-opus-5-5";
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 const WIDGET = "better";
 const SHUTDOWN = "session shutdown";
@@ -16,17 +15,15 @@ class Cancelled extends Error {}
 
 type HelperEvent = JsonAgentSessionEvent | SessionHeader;
 
-function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onEvent: (event: HelperEvent) => void): Promise<string> {
+function askHelper(cwd: string, sessionFile: string | undefined, modelArgs: string[], task: string, signal: AbortSignal, onEvent: (event: HelperEvent) => void): Promise<string> {
 	// The fork goes to a temp dir so it never shows up in /resume.
 	const sessionDir = sessionFile && mkdtempSync(join(tmpdir(), "pi-better-"));
 	const cleanUp = () => sessionDir && rmSync(sessionDir, { recursive: true, force: true });
 	const args = [
 		"--mode", "json", "-p",
 		...(sessionDir ? ["--fork", sessionFile, "--session-dir", sessionDir] : ["--no-session"]),
-		"--model", HELPER_MODEL, "--thinking", "high",
-		// bash stays for read-only searches and experiments; only the prompts keep it from writing.
-		"--tools", "read,grep,find,ls,bash", "--no-skills",
-		"--append-system-prompt", "You read and rewrite. Never edit files, start the work, or launch anything.",
+		// No --tools, --no-skills or extra system prompt: any of them can change the request's start and miss the cache.
+		...modelArgs,
 		task,
 	];
 	// Same launch as Pi's subagent example (getPiInvocation). A Bun-compiled pi runs from /$bunfs/root/ and is
@@ -38,7 +35,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		: [process.execPath];
 	let child: ChildProcessByStdio<null, Readable, Readable>;
 	try {
-		child = spawn(command, [...prefix, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+		child = spawn(command, [...prefix, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, [HELPER_ENV]: "1" } });
 	} catch (error) {
 		cleanUp();
 		throw error;
@@ -232,6 +229,8 @@ export default function (pi: ExtensionAPI) {
 	let helperRun: AbortController | undefined;
 	let boomerangRunning = false;
 
+	if (process.env[HELPER_ENV]) pi.on("tool_call", (event) => helperToolBlock(event.toolName, pi.getActiveTools()));
+
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (!helperRun) return;
 		// After this the old ctx is stale, so the cancelled run must not touch it (see the SHUTDOWN checks).
@@ -255,6 +254,13 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("/better is already running; /better-cancel stops it.", "error");
 				return;
 			}
+			let modelArgs: string[];
+			try {
+				const chatModel = ctx.model && `${ctx.model.provider}/${ctx.model.id}`;
+				modelArgs = helperModelArgs((pi.getSettings() as { better?: unknown }).better, chatModel, ctx.thinkingLevel);
+			} catch (error) {
+				return failed(ctx, "better", error);
+			}
 			// The helper reports the project by its real path (/private/tmp on macOS for /tmp). Resolved before the run
 			// is registered, so a deleted working folder fails here instead of leaving /better stuck "already running".
 			const projectDirs = [ctx.cwd, realpathSync(ctx.cwd)];
@@ -267,7 +273,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const finished = (async () => {
 				try {
-					const reply = await askHelper(ctx.cwd, fork, buildHelperTask(helper(), prompt), run.signal, (event) => widget?.apply(event));
+					const reply = await askHelper(ctx.cwd, fork, modelArgs, buildHelperTask(helper(), prompt), run.signal, (event) => widget?.apply(event));
 					let improved: string;
 					try {
 						improved = parseMarkedPrompt(reply);
