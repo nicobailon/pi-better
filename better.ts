@@ -11,6 +11,31 @@ ${OPEN}
 the rewritten prompt
 ${CLOSE}`;
 
+export const HELPER_ENV = "PI_BETTER_HELPER";
+// bash stays for read-only searches and experiments; only the prompts keep it from writing.
+const HELPER_TOOLS = new Set(["read", "grep", "find", "ls", "bash"]);
+
+// The helper keeps the chat's whole tool list, so its request starts the same as the chat's and reads from the
+// provider's prompt cache; it's held to reading by refusing the other tools when they're called.
+export function helperToolBlock(toolName: string): { block: true; reason: string } | undefined {
+	if (HELPER_TOOLS.has(toolName)) return undefined;
+	return { block: true, reason: `/better's helper only reads and rewrites, so ${toolName} is off. Use read, grep, find, ls or bash.` };
+}
+
+// By default the helper runs on the chat's model and thinking level, which the prompt cache needs. settings.json's
+// "better": { "model": "provider/id", "thinking": "high" } pins either one instead.
+export function helperModelArgs(setting: unknown, chatModel: string | undefined, chatThinking: string | undefined): string[] {
+	if (setting !== undefined && (typeof setting !== "object" || setting === null)) {
+		throw new Error(`"better" in settings.json must be an object like { "model": "anthropic/claude-opus-4-5", "thinking": "high" }.`);
+	}
+	const { model = chatModel, thinking = chatThinking } = (setting ?? {}) as { model?: unknown; thinking?: unknown };
+	if (typeof model !== "string") {
+		throw new Error(model === undefined ? "No model is selected; pick one with /model." : `"better.model" in settings.json must be a string like "anthropic/claude-opus-4-5".`);
+	}
+	if (thinking !== undefined && typeof thinking !== "string") throw new Error(`"better.thinking" in settings.json must be a string like "high".`);
+	return ["--model", model, ...(thinking ? ["--thinking", thinking] : [])];
+}
+
 export function buildHelperTask(helper: string, prompt: string): string {
 	return [
 		helper.trim(),
