@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable } from "node:stream";
 import type { ExtensionAPI, ExtensionContext, JsonAgentSessionEvent, SessionEntry, SessionHeader, Theme } from "@earendil-works/pi-coding-agent";
-import { Loader, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getKeybindings, Loader, type TUI, type TuiAltScreen, type TuiMainScreen, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { buildHelperTask, HELPER_ENV, helperExitError, helperModelArgs, helperToolBlock, parseMarkedPrompt, replyProgress } from "./better.ts";
 
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
@@ -125,14 +125,16 @@ export class HelperProgress extends Loader {
 	private readonly theme: Theme;
 	private readonly projectDirs: readonly string[];
 	private readonly startedAt: number;
+	private readonly escCancels: () => boolean;
 	private readonly tools: { id: string; label: string; state: "running" | "ok" | "failed" }[] = [];
 	private reply = "";
 
-	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number) {
+	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number, escCancels: () => boolean) {
 		super(tui, (cell) => cell, (message) => message, "", { frames: ["▰", "▱"], intervalMs: 400 });
 		this.theme = theme;
 		this.projectDirs = projectDirs;
 		this.startedAt = startedAt;
+		this.escCancels = escCancels;
 	}
 
 	apply(event: HelperEvent): void {
@@ -161,7 +163,9 @@ export class HelperProgress extends Loader {
 		const seconds = Math.floor((Date.now() - this.startedAt) / 1000);
 		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 		// Fixed width, so the clock and the cancel hint never shift.
-		const right = `${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", " · /better-cancel")} `;
+		const cancel = this.escCancels() ? `${getKeybindings().getKeys("app.interrupt").join("/")} cancels` : "/better-cancel";
+		const pad = " ".repeat(Math.max(0, "/better-cancel".length - cancel.length));
+		const right = `${pad}${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", ` · ${cancel}`)} `;
 		const room = width - visibleWidth(right) - 1;
 		const left = visibleWidth(meter + full) <= room ? meter + full : truncateToWidth(meter + short, room, "…");
 		const top = left + " ".repeat(Math.max(1, room + 1 - visibleWidth(left))) + right;
@@ -267,9 +271,28 @@ export default function (pi: ExtensionAPI) {
 			const run = new AbortController();
 			helperRun = run;
 			let widget: HelperProgress | undefined;
+			let stopListening: (() => void) | undefined;
 			if (ctx.mode === "tui") {
 				const startedAt = Date.now();
-				ctx.ui.setWidget(WIDGET, (tui, theme) => (widget = new HelperProgress(tui, theme, projectDirs, startedAt)));
+				// Pi's Esc stops the agent's run, and on a "!" line clears the input box; /better takes Esc only when it
+				// would do neither.
+				const escCancels = () => ctx.isIdle() && !ctx.ui.getEditorText().trimStart().startsWith("!");
+				// Pi's two screens, which both track focus; the TUI interface widgets get doesn't expose it.
+				let tui: TuiMainScreen | TuiAltScreen | undefined;
+				ctx.ui.setWidget(WIDGET, (ui, theme) => {
+					tui = ui as TuiMainScreen | TuiAltScreen;
+					return (widget = new HelperProgress(ui, theme, projectDirs, startedAt, escCancels));
+				});
+				stopListening = ctx.ui.onTerminalInput((data): undefined => {
+					const editor = tui?.getFocusedComponent() as { onEscape?: () => void } | null | undefined;
+					// Pi's editors have actionHandlers; a picker or dialog in focus keeps its own Esc.
+					if (!editor || !("actionHandlers" in editor) || !getKeybindings().matches(data, "app.interrupt") || !escCancels()) return;
+					// The key still reaches the editor, which keeps Esc for itself when autocomplete or a vim mode needs it.
+					// Only the Esc it passes on to Pi goes to /better, and only for this key press.
+					const piEscape = editor.onEscape;
+					editor.onEscape = () => run.abort();
+					queueMicrotask(() => (editor.onEscape = piEscape));
+				});
 			}
 			const finished = (async () => {
 				try {
@@ -292,6 +315,7 @@ export default function (pi: ExtensionAPI) {
 					else failed(ctx, "better", error);
 				} finally {
 					helperRun = undefined;
+					stopListening?.();
 					if (run.signal.reason !== SHUTDOWN) ctx.ui.setWidget(WIDGET, undefined);
 				}
 			})();

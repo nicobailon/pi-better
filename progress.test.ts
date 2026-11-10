@@ -12,7 +12,7 @@ registerHooks({
 	resolve: (specifier, context, next) =>
 		next(specifier.startsWith("@earendil-works/") ? pathToFileURL(`${PI_PACKAGES}/${specifier.slice(16)}/dist/index.js`).href : specifier, context),
 });
-const { stripTerminalSequences: plain, visibleWidth } = await import("@earendil-works/pi-tui");
+const { KeybindingsManager, setKeybindings, stripTerminalSequences: plain, visibleWidth } = await import("@earendil-works/pi-tui");
 const { default: extension, HelperProgress } = await import("./index.ts");
 
 // A real helper run in a clone at /tmp/pb-rec/pi-better: four tools (bash and grep in parallel, the bash failed),
@@ -24,7 +24,7 @@ const theme = { fg: (role: string, text: string) => `\x1b[${colors[role]}m${text
 test("the /better widget keeps the same height and fits the width in every frame of a real run", () => {
 	for (const width of [50, 80, 120, 200]) {
 		// 19m 59s in: the widest clock before the 20-minute timeout.
-		const widget = new HelperProgress({ requestRender() {} } as any, theme, ["/tmp/pb-rec/pi-better", "/private/tmp/pb-rec/pi-better"], Date.now() - 1_199_000);
+		const widget = new HelperProgress({ requestRender() {} } as any, theme, ["/tmp/pb-rec/pi-better", "/private/tmp/pb-rec/pi-better"], Date.now() - 1_199_000, () => false);
 		try {
 			let frame: string[] = [];
 			const shown = new Set<string>();
@@ -71,7 +71,7 @@ test("each tool shows as one short line: the real command or path, shortened to 
 		["grep", { pattern: "a\nb\tc", path: project }, "grep a b c"],
 	];
 	for (const [toolName, args, label] of cases) {
-		const widget = new HelperProgress({ requestRender() {} } as any, theme, [project], Date.now());
+		const widget = new HelperProgress({ requestRender() {} } as any, theme, [project], Date.now(), () => false);
 		try {
 			widget.apply({ type: "tool_execution_start", toolCallId: "1", toolName, args });
 			const tools = plain(widget.render(200)[1]);
@@ -82,34 +82,89 @@ test("each tool shows as one short line: the real command or path, shortened to 
 	}
 });
 
-test("/better returns at once while the agent is busy, and its prompt lands above the draft before the agent is idle", { timeout: 10_000 }, async () => {
+// Runs `body` with the helper replaced by fixtures/fake-pi.mjs, which replies once the gate file exists (or after 5 s).
+async function withFakeHelper(body: (setup: { dir: string; session: string; gate: string }) => Promise<void>): Promise<void> {
 	const dir = mkdtempSync(join(tmpdir(), "pb-busy-"));
 	const session = join(dir, "session.jsonl");
 	writeFileSync(session, "{}\n");
 	const script = process.argv[1];
-	// pi-better launches the helper from the running Pi's CLI script; here that's a stand-in that waits for a gate.
+	// pi-better launches the helper from the running Pi's CLI script.
 	process.argv[1] = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 	process.env.PI_BETTER_TEST_GATE = join(dir, "gate");
 	try {
+		await body({ dir, session, gate: process.env.PI_BETTER_TEST_GATE });
+	} finally {
+		process.argv[1] = script;
+		delete process.env.PI_BETTER_TEST_GATE;
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+test("/better returns at once while the agent is busy, and its prompt lands above the draft before the agent is idle", { timeout: 10_000 }, () =>
+	withFakeHelper(async ({ dir, session, gate }) => {
 		const commands: Record<string, any> = {};
 		const entries: string[] = [];
 		const sent: unknown[] = [];
 		extension({ registerCommand: (name: string, command: any) => (commands[name] = command), on() {}, getSettings: () => ({}), appendEntry: (type: string) => entries.push(type), sendMessage: (message: unknown) => sent.push(message) } as any);
 		let landed!: (text: string) => void;
 		const inputBox = new Promise<string>((resolve) => (landed = resolve));
-		const ui = { setWidget() {}, notify() {}, getEditorText: () => "my draft", setEditorText: (text: string) => landed(text) };
+		const ui = { setWidget() {}, notify() {}, onTerminalInput: () => () => {}, getEditorText: () => "my draft", setEditorText: (text: string) => landed(text) };
 		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => false, sessionManager: { getSessionFile: () => session }, ui };
 
 		await commands.better.handler("add a name flag", ctx);
 		assert.deepEqual(entries, [], "the command returned before the helper replied");
 
-		writeFileSync(process.env.PI_BETTER_TEST_GATE, "");
+		writeFileSync(gate, "");
 		assert.equal(await inputBox, "Add --name to run.sh and prove it with ./run.sh --name Ann.\n\nmy draft");
 		assert.deepEqual(entries, ["better"]);
 		assert.deepEqual(sent, [], "nothing reaches the model");
-	} finally {
-		process.argv[1] = script;
-		delete process.env.PI_BETTER_TEST_GATE;
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
+	}),
+);
+
+test("Esc cancels /better while the agent is idle, and goes to Pi while the agent is busy or no /better runs", { timeout: 10_000 }, () =>
+	withFakeHelper(async ({ dir, session }) => {
+		setKeybindings(new KeybindingsManager({ "app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" } }));
+		const commands: Record<string, any> = {};
+		const entries: string[] = [];
+		extension({ registerCommand: (name: string, command: any) => (commands[name] = command), on() {}, getSettings: () => ({}), appendEntry: (type: string) => entries.push(type) } as any);
+		// Pi's editor runs its app-level Esc handler, which stops the agent's run, when it doesn't need Esc itself.
+		let piEscapes = 0;
+		const editor = { actionHandlers: new Map(), onEscape: () => piEscapes++, handleInput(data: string) { if (data === "\x1b") this.onEscape(); } };
+		const tui = { getFocusedComponent: () => editor, requestRender() {} };
+		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
+		// Like Pi's TUI: the input listeners see each key first, then the focused component gets it.
+		const press = (data: string) => {
+			if (!listener?.(data)?.consume) editor.handleInput(data);
+		};
+		let shown: { dispose(): void } | undefined;
+		let notified!: (message: string) => void;
+		const notice = new Promise<string>((resolve) => (notified = resolve));
+		const ui = {
+			setWidget: (_key: string, factory?: (tui: unknown, theme: unknown) => { dispose(): void }) => {
+				shown?.dispose();
+				shown = factory?.(tui, theme);
+			},
+			onTerminalInput: (handler: typeof listener) => {
+				listener = handler;
+				return () => (listener = undefined);
+			},
+			notify: (message: string) => notified(message),
+			getEditorText: () => "",
+		};
+		let idle = false;
+		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => idle, sessionManager: { getSessionFile: () => session }, ui };
+
+		await commands.better.handler("add a name flag", ctx);
+		press("\x1b");
+		assert.equal(piEscapes, 1, "while the agent is busy, Esc stops the agent as usual");
+
+		idle = true;
+		press("\x1b");
+		assert.equal(await notice, "/better cancelled; nothing was sent");
+		assert.equal(piEscapes, 1);
+		assert.deepEqual(entries, []);
+
+		press("\x1b");
+		assert.equal(piEscapes, 2, "with no /better running, Esc is Pi's again");
+	}),
+);
