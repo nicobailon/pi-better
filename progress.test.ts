@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 
 // Pi's loader supplies its own pi-tui at runtime; outside Pi, use the global install like tsconfig.json does.
@@ -11,7 +13,7 @@ registerHooks({
 		next(specifier.startsWith("@earendil-works/") ? pathToFileURL(`${PI_PACKAGES}/${specifier.slice(16)}/dist/index.js`).href : specifier, context),
 });
 const { stripTerminalSequences: plain, visibleWidth } = await import("@earendil-works/pi-tui");
-const { HelperProgress } = await import("./index.ts");
+const { default: extension, HelperProgress } = await import("./index.ts");
 
 // A real helper run in a clone at /tmp/pb-rec/pi-better: four tools (bash and grep in parallel, the bash failed),
 // then answers (1) to (4) and the prompt. Payloads are trimmed; every event is kept, in order.
@@ -77,5 +79,37 @@ test("each tool shows as one short line: the real command or path, shortened to 
 		} finally {
 			widget.dispose();
 		}
+	}
+});
+
+test("/better returns at once while the agent is busy, and its prompt lands above the draft before the agent is idle", { timeout: 10_000 }, async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pb-busy-"));
+	const session = join(dir, "session.jsonl");
+	writeFileSync(session, "{}\n");
+	const script = process.argv[1];
+	// pi-better launches the helper from the running Pi's CLI script; here that's a stand-in that waits for a gate.
+	process.argv[1] = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
+	process.env.PI_BETTER_TEST_GATE = join(dir, "gate");
+	try {
+		const commands: Record<string, any> = {};
+		const entries: string[] = [];
+		const sent: unknown[] = [];
+		extension({ registerCommand: (name: string, command: any) => (commands[name] = command), on() {}, getSettings: () => ({}), appendEntry: (type: string) => entries.push(type), sendMessage: (message: unknown) => sent.push(message) } as any);
+		let landed!: (text: string) => void;
+		const inputBox = new Promise<string>((resolve) => (landed = resolve));
+		const ui = { setWidget() {}, notify() {}, getEditorText: () => "my draft", setEditorText: (text: string) => landed(text) };
+		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => false, sessionManager: { getSessionFile: () => session }, ui };
+
+		await commands.better.handler("add a name flag", ctx);
+		assert.deepEqual(entries, [], "the command returned before the helper replied");
+
+		writeFileSync(process.env.PI_BETTER_TEST_GATE, "");
+		assert.equal(await inputBox, "Add --name to run.sh and prove it with ./run.sh --name Ann.\n\nmy draft");
+		assert.deepEqual(entries, ["better"]);
+		assert.deepEqual(sent, [], "nothing reaches the model");
+	} finally {
+		process.argv[1] = script;
+		delete process.env.PI_BETTER_TEST_GATE;
+		rmSync(dir, { recursive: true, force: true });
 	}
 });
