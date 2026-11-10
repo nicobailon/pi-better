@@ -39,7 +39,7 @@ test("the helper runs on the chat's model and thinking level unless settings pin
 });
 
 test("the helper may only call read-only tools", () => {
-	for (const tool of ["read", "grep", "find", "ls", "bash"]) assert.equal(helperToolBlock(tool, ["read", "bash"]), undefined);
+	for (const tool of ["read", "grep", "find", "ls", "bash", "powershell"]) assert.equal(helperToolBlock(tool, ["read", "bash"]), undefined);
 	assert.match(helperToolBlock("edit", ["read", "bash", "edit", "write"])!.reason, /edit is off\. Use read, bash\.$/);
 	assert.equal(helperToolBlock("subagent", ["read", "bash"])?.block, true);
 });

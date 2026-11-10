@@ -87,7 +87,7 @@ Neither command changes earlier history, and your conversation only gains the me
 ## Limitations
 
 - The helper can't ask you questions while it works, so it decides from what it can read.
-- The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; only [helper.md](../helper.md) tells it not to.
+- The helper keeps its shell (`bash`, or `powershell`) so it can run read-only searches and quick experiments. A shell command could still write a file; only [helper.md](../helper.md) tells it not to.
 - The refusal comes from pi-better's copy inside the helper, so it needs pi-better installed where Pi finds it on its own (`~/.pi/agent/extensions` or `pi install`). Loaded only with `-e` for one chat, the helper won't have it, and only helper.md keeps it from editing.
 - The helper gets your settings, not the flags the chat was started with. A chat started with `--append-system-prompt`, `-e`, `--no-context-files` or similar flags sends a different opening, so the helper's request misses the cache.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.
