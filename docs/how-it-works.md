@@ -64,6 +64,7 @@ Neither command changes earlier history, and your conversation only gains the me
 | `/better-boomerang is already running; wait for it to finish.` | one boomerang at a time |
 | `/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>` | this chat has no entries yet, so there's no task to deepen |
 | `/better-boomerang failed: another extension cancelled the jump back to where the rewrite started` | another extension blocked the tree navigation; the rewrite is still in the chat |
+| `/better-boomerang failed: the rewrite's branch point is gone from the session` | the chat moved off the rewrite's branch during the turn; the rewrite is still in the session |
 
 `/better` also saves that reply as a `better` session entry. `/better-boomerang` reports a missing or empty block without the file part, and leaves the rewrite in the chat so you can see what happened.
 
