@@ -14,14 +14,8 @@ const SHUTDOWN = "session shutdown";
 
 class Cancelled extends Error {}
 
-// What `pi --mode json` prints: the session header, then one event per line.
 type HelperEvent = JsonAgentSessionEvent | SessionHeader;
 
-/**
- * Runs the helper as a separate `pi -p` process with your normal extensions and settings, no skills, read-only
- * tools, and a copy of this chat when `sessionFile` is given. Passes each event of its JSON stream to `onEvent`
- * and resolves with the text of its last reply.
- */
 function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onEvent: (event: HelperEvent) => void): Promise<string> {
 	// The fork goes to a temp dir so it never shows up in /resume.
 	const sessionDir = sessionFile && mkdtempSync(join(tmpdir(), "pi-better-"));
@@ -30,13 +24,13 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		"--mode", "json", "-p",
 		...(sessionDir ? ["--fork", sessionFile, "--session-dir", sessionDir] : ["--no-session"]),
 		"--model", HELPER_MODEL, "--thinking", "high",
-		// No edit or write; bash stays for read-only searches and experiments, and helper.md forbids writes.
+		// bash stays for read-only searches and experiments; only the prompts keep it from writing.
 		"--tools", "read,grep,find,ls,bash", "--no-skills",
 		"--append-system-prompt", "You read and rewrite. Never edit files, start the work, or launch anything.",
 		task,
 	];
-	// Same launch as Pi's subagent example (getPiInvocation): rerun this Pi's CLI script; a Bun-compiled pi
-	// is its own executable; otherwise `pi` from PATH.
+	// Same launch as Pi's subagent example (getPiInvocation). A Bun-compiled pi runs from /$bunfs/root/ and is
+	// its own executable.
 	const script = process.argv[1];
 	const [command, ...prefix] =
 		script && !script.startsWith("/$bunfs/root/") && existsSync(script) ? [process.execPath, script]
@@ -101,7 +95,6 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 	});
 }
 
-/** A path as you'd say it: inside the project, under ~, or else just its file name. */
 function shortPath(path: string, projectDirs: readonly string[]): string {
 	for (const dir of projectDirs) {
 		if (path === dir) return ".";
@@ -115,13 +108,10 @@ function shortPath(path: string, projectDirs: readonly string[]): string {
 function toolLabel(name: string, args: any, projectDirs: readonly string[]): string {
 	let label = name;
 	if (name === "bash" && typeof args?.command === "string") {
-		// The first real command: split at &&, ||, |, ; and newlines outside quotes, then skip any `cd` and
-		// variable setup.
 		const parts: string[] = (args.command.match(/(?:'[^']*'|"[^"]*"|(?<!&)&(?!&)|[^'"|;&\n])+/g) ?? []).map((part: string) => part.trim().replace(/^(\w+=\S*\s+)+/, ""));
 		const first = parts.find((part) => part && !/^(cd\s|\w+=\S*$)/.test(part)) ?? "";
 		label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (path) => shortPath(path, projectDirs));
 	} else {
-		// A path names the target unless it's the whole project; then the pattern does (grep, find).
 		const path = typeof args?.path === "string" ? shortPath(args.path, projectDirs) : ".";
 		const target = path === "." ? args?.pattern : path;
 		if (typeof target === "string") label = `${name} ${target}`;
@@ -130,14 +120,10 @@ function toolLabel(name: string, args: any, projectDirs: readonly string[]): str
 	return label.replace(/[\s\x00-\x1f\x7f]+/g, " ").trim() || name;
 }
 
-// What the helper is doing while it answers each of Felix's four questions.
+// One per question, in helper.md's order.
 const ANSWERING = ["Working out what a pro would do", "Finding the rawest material", "Picking the methods and tools", "Deciding what would prove it right"];
 
-/**
- * The /better widget, fed the helper's events: a six-cell meter (reading, the four answers, writing), what the
- * helper is doing now and the clock on one row, its tools on the next, newest last. Always two rows, each cut to
- * the terminal width. Loader's timer pulses the meter's current cell and repaints, which also moves the clock.
- */
+// Loader's timer, which pulses the meter's current cell, also repaints the clock.
 export class HelperProgress extends Loader {
 	private readonly theme: Theme;
 	private readonly projectDirs: readonly string[];
@@ -171,7 +157,6 @@ export class HelperProgress extends Loader {
 		const stage = writingPrompt ? 5 : answered;
 		const cells = [0, 1, 2, 3, 4, 5].map((i) => (i < stage ? theme.fg("accent", "▰") : i === stage ? theme.fg("accent", this.getRenderedIndicator()) : theme.fg("dim", "▱")));
 		const meter = ` ${cells.join("")}  `;
-		// What the helper is doing, in full and in a short form for narrow terminals, where the meter shows how far along.
 		const [full, short] =
 			writingPrompt ? [theme.fg("accent", "Writing your improved prompt"), theme.fg("accent", "Writing prompt")]
 			: answered ? [theme.fg("accent", ANSWERING[answered - 1]) + theme.fg("muted", ` (${answered} of 4)`), theme.fg("accent", "Thinking")]
@@ -193,7 +178,6 @@ export class HelperProgress extends Loader {
 		};
 		let bottom = `   ${theme.fg("dim", "no tools yet")}`;
 		if (this.tools.length) {
-			// The newest tools that fit, oldest dropped first.
 			const space = width - 3 - count.length - 3;
 			const shown: string[] = [];
 			for (let i = this.tools.length - 1; i >= 0; i--) {
@@ -231,11 +215,7 @@ function failed(ctx: ExtensionContext, command: string, error: unknown): void {
 	ctx.ui.notify(message, "error");
 }
 
-/**
- * Puts the prompt in the input box for the user to read and send. A draft already there stays, below the prompt.
- * Print and JSON mode have no editor, and RPC's getEditorText is always empty, so a draft there would be lost;
- * outside the TUI `posted` (or the prompt) is posted as a message instead.
- */
+// Print and JSON mode have no editor, and RPC's getEditorText is always empty, so a draft there would be lost.
 function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, posted = prompt): void {
 	if (ctx.mode !== "tui") {
 		pi.sendMessage({ customType: "better", content: posted, display: true });
@@ -349,7 +329,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				const branchPoint = ctx.sessionManager.getLeafId()!;
 
-				// Hidden from the chat but sent to the model; it starts a turn right away, so waitForIdle waits for it.
+				// triggerTurn starts the turn right away, so waitForIdle waits for it.
 				pi.sendMessage({ customType: "better-boomerang", content: buildHelperTask(helper(), prompt), display: false }, { triggerTurn: true });
 				await ctx.waitForIdle();
 
@@ -364,7 +344,7 @@ export default function (pi: ExtensionAPI) {
 					return failed(ctx, "better-boomerang", error);
 				}
 
-				// No summary: the rewrite leaves the active context and stays reachable in /tree.
+				// The rewrite leaves the active context and stays reachable in /tree.
 				const navigated = await ctx.navigateTree(branchPoint, { summarize: false });
 				if (navigated.cancelled) {
 					return failed(ctx, "better-boomerang", new Error("another extension cancelled the jump back to where the rewrite started"));

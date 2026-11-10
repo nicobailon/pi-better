@@ -11,7 +11,6 @@ ${OPEN}
 the rewritten prompt
 ${CLOSE}`;
 
-/** `prompt` is the command's trimmed argument; empty means "deepen the current task". */
 export function buildHelperTask(helper: string, prompt: string): string {
 	return [
 		helper.trim(),
@@ -20,7 +19,6 @@ export function buildHelperTask(helper: string, prompt: string): string {
 	].join("\n\n");
 }
 
-/** The prompt in the last marked block of a reply to a task from buildHelperTask. */
 export function parseMarkedPrompt(reply: string): string {
 	const end = reply.lastIndexOf(CLOSE);
 	const before = `\n${reply.slice(0, Math.max(end, 0))}`;
@@ -31,17 +29,12 @@ export function parseMarkedPrompt(reply: string): string {
 	return prompt;
 }
 
-/**
- * How far a reply to buildHelperTask has got, from the text written so far: `answered` is the highest of the
- * headed answers (1) to (4), and `writingPrompt` turns true once the marked block opens on a line of its own.
- */
 export function replyProgress(text: string): { answered: number; writingPrompt: boolean } {
 	let answered = 0;
 	for (const [, n] of text.matchAll(/^\W*\(([1-4])\)/gm)) answered = Math.max(answered, Number(n));
 	return { answered, writingPrompt: `\n${text}`.includes(OPEN_LINE) };
 }
 
-/** Why the helper process failed, from how it ended (Node gives a code or a signal) and its error output. */
 export function helperExitError(code: number | null, signal: string | null, stderr: string): string {
 	const how = code === null ? `was stopped by ${signal}` : `exited with code ${code}`;
 	const tail = stderr.trim().split("\n").slice(-3).join(" ");
