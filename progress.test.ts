@@ -99,7 +99,8 @@ async function withFakeHelper(body: (setup: { dir: string; session: string; gate
 	} finally {
 		process.argv[1] = script;
 		delete process.env.PI_BETTER_TEST_GATE;
-		process.env.TMPDIR = temp;
+		if (temp === undefined) delete process.env.TMPDIR;
+		else process.env.TMPDIR = temp;
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
