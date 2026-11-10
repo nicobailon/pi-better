@@ -34,7 +34,6 @@ test("the /better widget keeps the same height and fits the width in every frame
 				shown.add(plain(frame[0]).slice(9).replace(/ +19m 59s.*/, ""));
 			}
 			const [steps, tools] = frame.map(plain);
-			// Reading and the four answers are done; the sixth cell, writing, is the one pulsing.
 			assert.match(steps, /^ ▰{5}[▰▱]  /);
 			assert.match(steps, /19m 59s · \/better-cancel $/);
 			assert.match(tools, /✓ grep index\.ts +4 tools · 1 failed $/);
