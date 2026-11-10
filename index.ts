@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
+import type { Readable } from "node:stream";
+import type { ExtensionAPI, ExtensionContext, JsonAgentSessionEvent, SessionEntry, SessionHeader, Theme } from "@earendil-works/pi-coding-agent";
 import { Loader, type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { buildHelperTask, helperExitError, parseMarkedPrompt, replyProgress } from "./better.ts";
 
@@ -13,12 +14,15 @@ const SHUTDOWN = "session shutdown";
 
 class Cancelled extends Error {}
 
+// What `pi --mode json` prints: the session header, then one event per line.
+type HelperEvent = JsonAgentSessionEvent | SessionHeader;
+
 /**
- * Runs the helper as a separate `pi -p` process with your normal extensions and settings, read-only tools, and a
- * copy of this chat when `sessionFile` is given. Passes each event of its JSON stream to `onEvent` and resolves
- * with the text of its last reply.
+ * Runs the helper as a separate `pi -p` process with your normal extensions and settings, no skills, read-only
+ * tools, and a copy of this chat when `sessionFile` is given. Passes each event of its JSON stream to `onEvent`
+ * and resolves with the text of its last reply.
  */
-function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onEvent: (event: any) => void): Promise<string> {
+function askHelper(cwd: string, sessionFile: string | undefined, task: string, signal: AbortSignal, onEvent: (event: HelperEvent) => void): Promise<string> {
 	// The fork goes to a temp dir so it never shows up in /resume.
 	const sessionDir = sessionFile && mkdtempSync(join(tmpdir(), "pi-better-"));
 	const cleanUp = () => sessionDir && rmSync(sessionDir, { recursive: true, force: true });
@@ -38,7 +42,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		script && !script.startsWith("/$bunfs/root/") && existsSync(script) ? [process.execPath, script]
 		: /^(node|bun)(\.exe)?$/.test(basename(process.execPath).toLowerCase()) ? ["pi"]
 		: [process.execPath];
-	let child: ReturnType<typeof spawn>;
+	let child: ChildProcessByStdio<null, Readable, Readable>;
 	try {
 		child = spawn(command, [...prefix, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
 	} catch (error) {
@@ -57,11 +61,11 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		}, HELPER_TIMEOUT_MS);
 		const onAbort = () => child.kill();
 		signal.addEventListener("abort", onAbort, { once: true });
-		child.stdout!.setEncoding("utf8").on("data", (chunk: string) => {
+		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 			const lines = (buffered + chunk).split("\n");
 			buffered = lines.pop()!;
 			for (const line of lines) {
-				let event: any;
+				let event: HelperEvent;
 				try {
 					event = JSON.parse(line);
 				} catch {
@@ -72,12 +76,12 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 					// --mode json exits 0 even when the model call failed, so the failure is read from the message.
 					const failedTurn = event.message.stopReason === "error" || event.message.stopReason === "aborted";
 					modelError = failedTurn ? event.message.errorMessage || `request ${event.message.stopReason}` : undefined;
-					const text = event.message.content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n");
+					const text = event.message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
 					if (text.trim()) reply = text;
 				}
 			}
 		});
-		child.stderr!.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+		child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
 		const settle = (error?: Error) => {
 			clearTimeout(timer);
 			signal.removeEventListener("abort", onAbort);
@@ -88,7 +92,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, task: string, s
 		child.on("error", (error) => settle(new Error(`Couldn't start pi for the helper: ${error.message}`)));
 		child.on("close", (code, exitSignal) => {
 			if (signal.aborted) return settle(new Cancelled());
-			if (timedOut) return settle(new Error("The helper timed out after 20 minutes"));
+			if (timedOut) return settle(new Error(`The helper timed out after ${HELPER_TIMEOUT_MS / 60_000} minutes`));
 			if (code !== 0) return settle(new Error(helperExitError(code, exitSignal, stderr)));
 			if (modelError) return settle(new Error(`The helper's model call failed: ${modelError}`));
 			if (!reply.trim()) return settle(new Error("The helper finished without replying"));
@@ -111,8 +115,8 @@ function shortPath(path: string, projectDirs: readonly string[]): string {
 function toolLabel(name: string, args: any, projectDirs: readonly string[]): string {
 	let label = name;
 	if (name === "bash" && typeof args?.command === "string") {
-		// The first real command: split at &&, ||, |, ; and newlines outside quotes, then skip a `cd` into the
-		// project and variable setup.
+		// The first real command: split at &&, ||, |, ; and newlines outside quotes, then skip any `cd` and
+		// variable setup.
 		const parts: string[] = (args.command.match(/(?:'[^']*'|"[^"]*"|(?<!&)&(?!&)|[^'"|;&\n])+/g) ?? []).map((part: string) => part.trim().replace(/^(\w+=\S*\s+)+/, ""));
 		const first = parts.find((part) => part && !/^(cd\s|\w+=\S*$)/.test(part)) ?? "";
 		label = first.replace(/(?<![\w.~$>:/])\/(?!dev\/)[\w.@+-]+(?:\/[\w.@+-]*)*/g, (path) => shortPath(path, projectDirs));
@@ -148,7 +152,7 @@ export class HelperProgress extends Loader {
 		this.startedAt = startedAt;
 	}
 
-	apply(event: any): void {
+	apply(event: HelperEvent): void {
 		if (event.type === "tool_execution_start") {
 			this.tools.push({ id: event.toolCallId, label: toolLabel(event.toolName, event.args, this.projectDirs), state: "running" });
 		} else if (event.type === "tool_execution_end") {
@@ -223,7 +227,7 @@ function lastAssistantText(entries: readonly SessionEntry[]): string {
 
 function failed(ctx: ExtensionContext, command: string, error: unknown): void {
 	const message = `/${command} failed: ${error instanceof Error ? error.message : String(error)}`;
-	if (!ctx.hasUI) throw new Error(message);
+	if (!ctx.hasUI) throw new Error(message, { cause: error });
 	ctx.ui.notify(message, "error");
 }
 
@@ -313,7 +317,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("better-cancel", {
 		description: "Stop the /better helper that's running",
 		handler: async (_args, ctx) => {
-			if (!helperRun) return ctx.ui.notify("No /better is running.", "info");
+			if (!helperRun) {
+				ctx.ui.notify("No /better is running.", "info");
+				return;
+			}
 			helperRun.abort();
 		},
 	});
@@ -347,9 +354,11 @@ export default function (pi: ExtensionAPI) {
 				await ctx.waitForIdle();
 
 				const branch = ctx.sessionManager.getBranch();
+				const start = branch.findIndex((entry) => entry.id === branchPoint);
+				if (start < 0) return failed(ctx, "better-boomerang", new Error("the rewrite's branch point is gone from the session"));
 				let improved: string;
 				try {
-					improved = parseMarkedPrompt(lastAssistantText(branch.slice(branch.findIndex((entry) => entry.id === branchPoint) + 1)));
+					improved = parseMarkedPrompt(lastAssistantText(branch.slice(start + 1)));
 				} catch (error) {
 					// The rewrite stays on the branch so the user can see what went wrong.
 					return failed(ctx, "better-boomerang", error);

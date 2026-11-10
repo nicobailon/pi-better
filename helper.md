@@ -3,8 +3,8 @@ First, without asking me anything, find and read the code, files, docs and logs 
 ## How to work
 
 1. Gather the raw material. Don't rely on summaries in the conversation when the source is reachable, and screenshots count too.
-   Keep every command quick; the user is waiting until you finish. Search the project and the paths the request names, not whole home, session-log or cache directories (`~/.pi/agent/sessions` alone can hold tens of gigabytes). Give any command that might be slow a `timeout` of 30 seconds or less, and when one times out, narrow it instead of retrying it.
+   Keep every command quick; I'm waiting until you finish. Search the project and the paths the request names, not whole home, session-log or cache directories (`~/.pi/agent/sessions` alone can hold tens of gigabytes). Give any command that might be slow a `timeout` of 30 seconds or less, and when one times out, narrow it instead of retrying it.
 2. Answer (1) to (4) in a few lines each, using concrete facts from what you found: file names, counts, real names of components, commands and tools that exist here.
-3. Rewrite the prompt so it asks for exactly that: the deeper version, not a bigger one. Keep the user's goal and voice, put the concrete facts in, and say what proves the result is right. Write it as the user's own request, ready to send as is.
+3. Rewrite the prompt so it asks for exactly that: the deeper version, not a bigger one. Keep my goal and voice, put the concrete facts in, and say what proves the result is right. Write it as my own request, ready to send as is.
 
 Never carry the prompt out. Don't edit files, start work, or launch anything; you only read and rewrite.
