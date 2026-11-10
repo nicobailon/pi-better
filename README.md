@@ -100,14 +100,17 @@ Pi loads extensions from `~/.pi/agent/extensions` on its own, so run `/reload` (
 
 ## What you'll see
 
-While `/better` works, two rows above your input box say what the helper is doing (reading your code and files, answering each of the four questions, then writing your improved prompt) and show its latest tools with ✓ or ✗. Two moments from a real run at 80 columns:
+While `/better` works, two rows above your input box say what the helper is doing and show its latest tools with ✓ or ✗. A six-cell meter fills as it goes: reading your code and files, working through the four questions, then writing your improved prompt. The current cell pulses. Three moments from a real run at 80 columns:
 
 ```text
- ⠧ Reading your code and files                             13s · /better-cancel
-   ✓ cat index.ts  ✓ cat progress.test.ts better…                       3 tools
+ ▰▱▱▱▱▱  Reading your code and files                        8s · /better-cancel
+   ✓ read docs/how-it-works.md  ✓ cat package.json better.ts …          5 tools
 
- ⠼ Question 3 of 4: which methods and tools?            1m 15s · /better-cancel
-   ✓ grep -n "no-extensions\|\"-…                            9 tools · 1 failed
+ ▰▰▰▰▱▱  Picking the methods and tools (3 of 4)         1m 27s · /better-cancel
+   ✓ grep -m6 "wasAborted=true" …                           15 tools · 1 failed
+
+ ▰▰▰▰▰▰  Writing your improved prompt                   1m 30s · /better-cancel
+   ✓ grep -m6 "wasAborted=true" …                           15 tools · 1 failed
 ```
 
 When it's done, the improved prompt is in your input box with this notice:

@@ -32,20 +32,22 @@ test("the /better widget keeps the same height and fits the width in every frame
 				frame = widget.render(width);
 				assert.equal(frame.length, 2, `${width} columns, ${event.type}`);
 				for (const line of frame) assert.ok(visibleWidth(line) <= width, `${width} columns: ${plain(line)}`);
-				shown.add(plain(frame[0]).slice(3).replace(/ +19m 59s.*/, ""));
+				shown.add(plain(frame[0]).slice(9).replace(/ +19m 59s.*/, ""));
 			}
 			const [steps, tools] = frame.map(plain);
+			// Reading and the four answers are done; the sixth cell, writing, is the one pulsing.
+			assert.match(steps, /^ ▰{5}[▰▱]  /);
 			assert.match(steps, /19m 59s · \/better-cancel $/);
 			assert.match(tools, /✓ grep index\.ts +4 tools · 1 failed $/);
 			if (width === 50) {
-				assert.deepEqual([...shown], ["Reading files", "Question 1 of 4", "Question 2 of 4", "Question 3 of 4", "Question 4 of 4", "Writing the prompt"]);
+				assert.deepEqual([...shown], ["Reading files", "Thinking", "Writing prompt"]);
 			} else {
 				assert.deepEqual([...shown], [
 					"Reading your code and files",
-					"Question 1 of 4: what would a pro do here?",
-					"Question 2 of 4: what's the raw material?",
-					"Question 3 of 4: which methods and tools?",
-					"Question 4 of 4: what would prove it right?",
+					"Working out what a pro would do (1 of 4)",
+					"Finding the rawest material (2 of 4)",
+					"Picking the methods and tools (3 of 4)",
+					"Deciding what would prove it right (4 of 4)",
 					"Writing your improved prompt",
 				]);
 				assert.match(tools, /✗ ls -a \.pi\/todos/);

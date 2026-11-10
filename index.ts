@@ -126,13 +126,13 @@ function toolLabel(name: string, args: any, projectDirs: readonly string[]): str
 	return label.replace(/[\s\x00-\x1f\x7f]+/g, " ").trim() || name;
 }
 
-// Felix's four questions, as the widget names them while the helper answers each one.
-const QUESTIONS = ["what would a pro do here?", "what's the raw material?", "which methods and tools?", "what would prove it right?"];
+// What the helper is doing while it answers each of Felix's four questions.
+const ANSWERING = ["Working out what a pro would do", "Finding the rawest material", "Picking the methods and tools", "Deciding what would prove it right"];
 
 /**
- * The /better widget, fed the helper's events: what the helper is doing now and the clock on one row, its tools on
- * the next, newest last. Always two rows, each cut to the terminal width. Loader's timer turns the spinner and
- * repaints, which also moves the clock.
+ * The /better widget, fed the helper's events: a six-cell meter (reading, the four answers, writing), what the
+ * helper is doing now and the clock on one row, its tools on the next, newest last. Always two rows, each cut to
+ * the terminal width. Loader's timer pulses the meter's current cell and repaints, which also moves the clock.
  */
 export class HelperProgress extends Loader {
 	private readonly theme: Theme;
@@ -142,7 +142,7 @@ export class HelperProgress extends Loader {
 	private reply = "";
 
 	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number) {
-		super(tui, (spinner) => theme.fg("accent", spinner), (message) => message);
+		super(tui, (cell) => cell, (message) => message, "", { frames: ["▰", "▱"], intervalMs: 400 });
 		this.theme = theme;
 		this.projectDirs = projectDirs;
 		this.startedAt = startedAt;
@@ -164,18 +164,20 @@ export class HelperProgress extends Loader {
 	override render(width: number): string[] {
 		const { theme } = this;
 		const { answered, writingPrompt } = replyProgress(this.reply);
-		// What the helper is doing, in full and in a short form for narrow terminals.
-		const spinner = ` ${this.getRenderedIndicator()} `;
+		const stage = writingPrompt ? 5 : answered;
+		const cells = [0, 1, 2, 3, 4, 5].map((i) => (i < stage ? theme.fg("accent", "▰") : i === stage ? theme.fg("accent", this.getRenderedIndicator()) : theme.fg("dim", "▱")));
+		const meter = ` ${cells.join("")}  `;
+		// What the helper is doing, in full and in a short form for narrow terminals, where the meter shows how far along.
 		const [full, short] =
-			writingPrompt ? [theme.fg("accent", "Writing your improved prompt"), theme.fg("accent", "Writing the prompt")]
-			: answered ? [theme.fg("accent", `Question ${answered} of 4: `) + theme.fg("muted", QUESTIONS[answered - 1]), theme.fg("accent", `Question ${answered} of 4`)]
+			writingPrompt ? [theme.fg("accent", "Writing your improved prompt"), theme.fg("accent", "Writing prompt")]
+			: answered ? [theme.fg("accent", ANSWERING[answered - 1]) + theme.fg("muted", ` (${answered} of 4)`), theme.fg("accent", "Thinking")]
 			: [theme.fg("accent", "Reading your code and files"), theme.fg("accent", "Reading files")];
 		const seconds = Math.floor((Date.now() - this.startedAt) / 1000);
 		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 		// Fixed width, so the clock and the cancel hint never shift.
 		const right = `${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", " · /better-cancel")} `;
 		const room = width - visibleWidth(right) - 1;
-		const left = visibleWidth(spinner + full) <= room ? spinner + full : truncateToWidth(spinner + short, room, "…");
+		const left = visibleWidth(meter + full) <= room ? meter + full : truncateToWidth(meter + short, room, "…");
 		const top = left + " ".repeat(Math.max(1, room + 1 - visibleWidth(left))) + right;
 
 		const failed = this.tools.filter((tool) => tool.state === "failed").length;
