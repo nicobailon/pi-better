@@ -62,6 +62,7 @@ Neither command changes earlier history, and your conversation only gains the me
 | `/better failed: The reply has no <improved-prompt> … </improved-prompt> block. The helper's whole reply is in …` | the reply ended without the marked prompt; open the file named at the end to see what the helper wrote, then run the command again |
 | `/better failed: The reply's <improved-prompt> block is empty. The helper's whole reply is in …` | same, with an empty block |
 | `/better-boomerang is already running; wait for it to finish.` | one boomerang at a time |
+| `/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>` | this chat has no entries yet, so there's no task to deepen |
 | `/better-boomerang failed: another extension cancelled the jump back to where the rewrite started` | another extension blocked the tree navigation; the rewrite is still in the chat |
 
 `/better` also saves that reply as a `better` session entry. `/better-boomerang` reports a missing or empty block without the file part, and leaves the rewrite in the chat so you can see what happened.
@@ -71,4 +72,3 @@ Neither command changes earlier history, and your conversation only gains the me
 - The helper can't ask you questions while it works, so it decides from what it can read.
 - The helper keeps `bash` so it can run read-only searches and quick experiments. A shell command could still write a file; only [helper.md](../helper.md) tells it not to.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.
-- In a new session with no history yet, there's no task to deepen, so each command needs a prompt.

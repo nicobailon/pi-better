@@ -1,5 +1,7 @@
 const OPEN = "<improved-prompt>";
 const CLOSE = "</improved-prompt>";
+// The opening tag counts only on a line of its own; the prompt itself may mention the tag inline.
+const OPEN_LINE = `\n${OPEN}\n`;
 
 const RETURN = `## Return
 
@@ -13,7 +15,7 @@ ${CLOSE}`;
 export function buildHelperTask(helper: string, prompt: string): string {
 	return [
 		helper.trim(),
-		`## Prompt to deepen\n\n${prompt || "None given: deepen the task in progress in the conversation so far, including any feedback the user gave on work already done."}`,
+		`## Prompt to deepen\n\n${prompt || "None given: deepen the task in progress in the conversation so far, including any feedback I gave on work already done."}`,
 		RETURN,
 	].join("\n\n");
 }
@@ -21,11 +23,10 @@ export function buildHelperTask(helper: string, prompt: string): string {
 /** The prompt in the last marked block of a reply to a task from buildHelperTask. */
 export function parseMarkedPrompt(reply: string): string {
 	const end = reply.lastIndexOf(CLOSE);
-	// The opening tag is on a line of its own; the prompt itself may mention the tag inline.
 	const before = `\n${reply.slice(0, Math.max(end, 0))}`;
-	const start = before.lastIndexOf(`\n${OPEN}\n`);
+	const start = before.lastIndexOf(OPEN_LINE);
 	if (end < 0 || start < 0) throw new Error(`The reply has no ${OPEN} … ${CLOSE} block.`);
-	const prompt = before.slice(start + OPEN.length + 2).trim();
+	const prompt = before.slice(start + OPEN_LINE.length).trim();
 	if (!prompt) throw new Error(`The reply's ${OPEN} block is empty.`);
 	return prompt;
 }
@@ -37,7 +38,7 @@ export function parseMarkedPrompt(reply: string): string {
 export function replyProgress(text: string): { answered: number; writingPrompt: boolean } {
 	let answered = 0;
 	for (const [, n] of text.matchAll(/^\W*\(([1-4])\)/gm)) answered = Math.max(answered, Number(n));
-	return { answered, writingPrompt: `\n${text}`.includes(`\n${OPEN}\n`) };
+	return { answered, writingPrompt: `\n${text}`.includes(OPEN_LINE) };
 }
 
 /** Why the helper process failed, from how it ended (Node gives a code or a signal) and its error output. */

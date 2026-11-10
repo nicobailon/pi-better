@@ -18,7 +18,7 @@ pi-better sends this prompt with two changes: it opens with "First, without aski
 
 Ask a model to "make this better" and it usually changes its vocabulary, not its methods. It works from whatever summary is already in the chat, does a bigger version of the same task, and then judges its own result. Felix's four questions fix each of those: what a professional would do that you didn't ask for, the raw material instead of the digest, the actual methods and tools, and a check that doesn't come from you or the model.
 
-The prompt only works as well as the answers to those questions, and good answers need the real material. pi-better runs the prompt with a read-only helper that opens your code, files and logs and runs searches before it answers, so the rewrite names real files, real commands and a real way to check the result. The helper works in the background while you keep chatting, and the result goes into your input box, so you decide what gets sent.
+The prompt only works as well as the answers to those questions, and good answers need the real material. pi-better runs the prompt with a read-only helper that opens your code, files and logs and runs searches before it answers, so the rewrite names the files, commands and checks that exist in your project. The helper works in the background while you keep chatting, and the result goes into your input box, so you decide what gets sent.
 
 ## Example
 
@@ -74,7 +74,7 @@ Proof it's right:
   what to do without opening the README.
 ```
 
-It didn't just reword strings. It listed every error path with its line number, said to cause each failure for real before changing anything, and found three problems nobody had asked about: a killed helper reports "exited with code null", an empty error output leaves the message ending in a colon, and a reply with no marked prompt is thrown away. It also says what proves the result right: the real failures rerun, the README matching the real messages word for word, and a cold read by someone new.
+It listed every error path with its line number, said to cause each failure for real before changing anything, and found three problems nobody had asked about, all fixed since: a killed helper reported "exited with code null", an empty error output left the message ending in a colon, and a reply with no marked prompt was thrown away. It also says what proves the result right: the real failures rerun, the README matching the real messages word for word, and a cold read by someone new.
 
 ## Three ways to run the prompt
 
