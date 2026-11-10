@@ -24,7 +24,7 @@ const theme = { fg: (role: string, text: string) => `\x1b[${colors[role]}m${text
 test("the /better widget keeps the same height and fits the width in every frame of a real run", () => {
 	for (const width of [50, 80, 120, 200]) {
 		// 19m 59s in: the widest clock before the 20-minute timeout.
-		const widget = new HelperProgress({ requestRender() {} } as any, theme, ["/tmp/pb-rec/pi-better", "/private/tmp/pb-rec/pi-better"], Date.now() - 1_199_000, () => false);
+		const widget = new HelperProgress({ requestRender() {} } as any, theme, ["/tmp/pb-rec/pi-better", "/private/tmp/pb-rec/pi-better"], Date.now() - 1_199_000);
 		try {
 			let frame: string[] = [];
 			const shown = new Set<string>();
@@ -71,7 +71,7 @@ test("each tool shows as one short line: the real command or path, shortened to 
 		["grep", { pattern: "a\nb\tc", path: project }, "grep a b c"],
 	];
 	for (const [toolName, args, label] of cases) {
-		const widget = new HelperProgress({ requestRender() {} } as any, theme, [project], Date.now(), () => false);
+		const widget = new HelperProgress({ requestRender() {} } as any, theme, [project], Date.now());
 		try {
 			widget.apply({ type: "tool_execution_start", toolCallId: "1", toolName, args });
 			const tools = plain(widget.render(200)[1]);
@@ -121,7 +121,7 @@ test("/better returns at once while the agent is busy, and its prompt lands abov
 	}),
 );
 
-test("Esc cancels /better while the agent is idle, and goes to Pi while the agent is busy or no /better runs", { timeout: 10_000 }, () =>
+test("the first Esc cancels /better even while the agent is busy, and the next Esc goes to Pi", { timeout: 10_000 }, () =>
 	withFakeHelper(async ({ dir, session }) => {
 		setKeybindings(new KeybindingsManager({ "app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" } }));
 		const commands: Record<string, any> = {};
@@ -149,24 +149,19 @@ test("Esc cancels /better while the agent is idle, and goes to Pi while the agen
 				return () => (listener = undefined);
 			},
 			notify: (message: string) => notified(message),
-			getEditorText: () => "",
 		};
-		let idle = false;
-		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => idle, sessionManager: { getSessionFile: () => session }, ui };
+		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => false, sessionManager: { getSessionFile: () => session }, ui };
 
 		await commands.better.handler("add a name flag", ctx);
-		press("\x1b");
-		assert.equal(piEscapes, 1, "while the agent is busy, Esc stops the agent as usual");
-
-		idle = true;
-		// A Kitty terminal's Esc press and release, arriving in one chunk.
+		// Esc pressed twice fast in a Kitty terminal: press, release and press arrive in one chunk.
 		press("\x1b[27u");
 		press("\x1b[27;1:3u");
+		press("\x1b[27u");
+		assert.equal(piEscapes, 1, "the second Esc stops the agent");
 		assert.equal(await notice, "/better cancelled; nothing was sent");
-		assert.equal(piEscapes, 1);
 		assert.deepEqual(entries, []);
 
 		press("\x1b");
-		assert.equal(piEscapes, 2, "with no /better running, Esc is Pi's again");
+		assert.equal(piEscapes, 2, "after the run, Esc is Pi's");
 	}),
 );
