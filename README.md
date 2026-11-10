@@ -110,15 +110,17 @@ Pi loads extensions from `~/.pi/agent/extensions` on its own, so run `/reload` (
 While `/better` works, two rows above your input box say what the helper is doing and show its latest tools with ✓ or ✗. A six-cell meter fills as it goes: reading your code and files, working through the four questions, then writing your improved prompt. The current cell pulses. Three moments from a real run at 80 columns:
 
 ```text
- ▰▱▱▱▱▱  Reading your code and files                        8s · /better-cancel
+ ▰▱▱▱▱▱  Reading your code and files                        8s · escape cancels
    ✓ read docs/how-it-works.md  ✓ cat package.json better.ts …          5 tools
 
- ▰▰▰▰▱▱  Picking the methods and tools (3 of 4)         1m 27s · /better-cancel
+ ▰▰▰▰▱▱  Picking the methods and tools (3 of 4)         1m 27s · escape cancels
    ✓ grep -m6 "wasAborted=true" …                           15 tools · 1 failed
 
- ▰▰▰▰▰▰  Writing your improved prompt                   1m 30s · /better-cancel
+ ▰▰▰▰▰▰  Writing your improved prompt                   1m 30s · escape cancels
    ✓ grep -m6 "wasAborted=true" …                           15 tools · 1 failed
 ```
+
+Esc stops the helper while the agent is idle. While the agent is busy, Esc stops the agent as usual and the hint says `/better-cancel` instead.
 
 When it's done, the improved prompt is in your input box with this notice:
 
@@ -134,7 +136,7 @@ Anything you'd typed meanwhile stays in the box, below the prompt, and the notic
 |---|---|
 | Deepen a prompt | `/better <prompt>` |
 | Deepen the task you're working on now, including your feedback so far | `/better` with no prompt |
-| Stop the helper | `/better-cancel` |
+| Stop the helper | Esc while the agent is idle, or `/better-cancel` any time |
 | Watch the rewrite happen in the chat | `/better-boomerang <prompt>` (or no prompt, for the task in progress) |
 
 [How it works](docs/how-it-works.md) covers the helper process, the copy of your chat, print and RPC mode, the prompt cache, every error message and the limitations.

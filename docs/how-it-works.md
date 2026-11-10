@@ -44,6 +44,8 @@ When the helper exits, pi-better takes the text of its last reply, reads the pro
 
 **One at a time.** A second `/better` while one is running is refused. `/better-cancel` stops the helper, and so does starting or switching sessions (`/new`, `/resume`, `/reload`); after a session switch, the stopped run doesn't touch the old session.
 
+**Esc stops it while the agent is idle.** Pi's own Esc stops the agent's run, and on a `!` line it clears the input box, so `/better` takes Esc only when the agent is idle and the box isn't a `!` line; the widget's hint shows which applies ("escape cancels" or "/better-cancel"). Pi reserves Esc, so an extension can't register it as a shortcut. Instead pi-better watches keys as they come in, and for one Esc it points the input box's app-level Esc handler at `/better`. The input box still gets the key first, so Esc that closes autocomplete, or leaves insert mode in a vim-style editor, does that and nothing else, and a picker or dialog in focus keeps its Esc.
+
 ## `/better-boomerang`
 
 The agent in this chat answers the same task, as a hidden message that starts a turn. It can read and run commands like any turn, but it's told only to read and rewrite. When the turn ends, pi-better reads the prompt from the reply, jumps the chat back to the entry before the rewrite with Pi's tree navigation (no summary), and puts the prompt in your input box. The rewrite turn leaves the chat's context but stays in `/tree`.
@@ -68,7 +70,7 @@ Neither command changes earlier history, and your conversation only gains the me
 | `/better failed: "better" in settings.json must be an object like …` | `better` in `settings.json` isn't `{ "model": …, "thinking": … }` |
 | `/better failed: "better.model" in settings.json must be a string like …` | `better.model` is empty or not a string |
 | `/better failed: "better.thinking" in settings.json must be one of …` | `better.thinking` isn't one of Pi's thinking levels |
-| `/better cancelled; nothing was sent` | you ran `/better-cancel` |
+| `/better cancelled; nothing was sent` | you pressed Esc or ran `/better-cancel` |
 | `No /better is running.` | `/better-cancel` had nothing to stop |
 | `/better failed: Couldn't start pi for the helper: …` | the `pi` command couldn't be launched |
 | `/better failed: The helper timed out after 20 minutes` | the helper hit its limit; try a narrower prompt |
@@ -93,3 +95,4 @@ Neither command changes earlier history, and your conversation only gains the me
 - The refusal comes from pi-better's copy inside the helper, so it needs pi-better installed where Pi finds it on its own (`~/.pi/agent/extensions` or `pi install`). Loaded only with `-e` for one chat, the helper won't have it, and only helper.md keeps it from editing.
 - The helper gets your settings, not the flags the chat was started with. A chat started with `--append-system-prompt`, `-e`, `--no-context-files` or similar flags sends a different opening, so the helper's request misses the cache.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.
+- Pi doesn't tell extensions when a `!` command finishes. If one is running while the agent is idle and `/better` works, the first Esc stops `/better`; press Esc again to stop the command.
