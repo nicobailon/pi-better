@@ -54,7 +54,7 @@ Print and JSON mode have no input box, and in RPC mode pi-better can't read what
 
 ## The prompt cache
 
-Neither command changes earlier history, and your conversation only gains the message you send, so the prompt cache stays warm. `/better-boomerang` costs one extra turn on top of the cached history. `/better`'s helper is a separate conversation with its own cache.
+Neither command changes earlier history, and your conversation only gains the message you send, so the prompt cache stays warm. `/better-boomerang` costs one extra turn on top of the cached history. `/better`'s helper sends the same opening as the chat, so it reads the chat's cached history too (see [`/better`](#better)), unless `settings.json` gives it a different model or thinking level.
 
 ## Error messages
 
@@ -62,6 +62,10 @@ Neither command changes earlier history, and your conversation only gains the me
 |---|---|
 | `/better has no task to deepen yet; give it a prompt: /better <prompt>` | nothing has been saved in this session yet, so there's no task to deepen |
 | `/better is already running; /better-cancel stops it.` | one helper runs at a time |
+| `/better failed: No model is selected; pick one with /model.` | the chat has no model yet, so the helper has none to use |
+| `/better failed: "better" in settings.json must be an object like …` | `better` in `settings.json` isn't `{ "model": …, "thinking": … }` |
+| `/better failed: "better.model" in settings.json must be a string like …` | `better.model` is empty or not a `provider/id` string |
+| `/better failed: "better.thinking" in settings.json must be one of …` | `better.thinking` isn't one of Pi's thinking levels |
 | `/better cancelled; nothing was sent` | you ran `/better-cancel` |
 | `No /better is running.` | `/better-cancel` had nothing to stop |
 | `/better failed: Couldn't start pi for the helper: …` | the `pi` command couldn't be launched |

@@ -21,13 +21,13 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 export function helperToolBlock(toolName: string, activeTools: string[]): { block: true; reason: string } | undefined {
 	if (HELPER_TOOLS.includes(toolName)) return undefined;
 	const usable = HELPER_TOOLS.filter((tool) => activeTools.includes(tool)).join(", ");
-	return { block: true, reason: `/better's helper only reads and rewrites, so ${toolName} is off. Use ${usable}.` };
+	return { block: true, reason: `/better's helper only reads and rewrites, so ${toolName} is off.${usable ? ` Use ${usable}.` : ""}` };
 }
 
 // By default the helper runs on the chat's model and thinking level, which the prompt cache needs. settings.json's
 // "better": { "model": "provider/id", "thinking": "high" } pins either one instead.
 export function helperModelArgs(setting: unknown, chatModel: string | undefined, chatThinking: string | undefined): string[] {
-	if (setting !== undefined && (typeof setting !== "object" || setting === null)) {
+	if (setting !== undefined && (typeof setting !== "object" || setting === null || Array.isArray(setting))) {
 		throw new Error(`"better" in settings.json must be an object like { "model": "anthropic/claude-opus-4-5", "thinking": "high" }.`);
 	}
 	const { model = chatModel, thinking = chatThinking } = (setting ?? {}) as { model?: unknown; thinking?: unknown };
