@@ -22,7 +22,7 @@ function askHelper(cwd: string, sessionFile: string | undefined, modelArgs: stri
 	const args = [
 		"--mode", "json", "-p",
 		...(sessionDir ? ["--fork", sessionFile, "--session-dir", sessionDir] : ["--no-session"]),
-		// No --tools, --no-skills or extra system prompt: any of them would change the request's start and miss the cache.
+		// No --tools, --no-skills or extra system prompt: any of them can change the request's start and miss the cache.
 		...modelArgs,
 		task,
 	];

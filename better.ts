@@ -12,8 +12,9 @@ the rewritten prompt
 ${CLOSE}`;
 
 export const HELPER_ENV = "PI_BETTER_HELPER";
-// bash stays for read-only searches and experiments; only the prompts keep it from writing.
-const HELPER_TOOLS = ["read", "grep", "find", "ls", "bash"];
+// The shell (bash, or powershell where a setup swaps it in) stays for read-only searches and experiments; only the
+// prompts keep it from writing.
+const HELPER_TOOLS = ["read", "grep", "find", "ls", "bash", "powershell"];
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 // The helper keeps the chat's whole tool list, so its request starts the same as the chat's and reads from the
