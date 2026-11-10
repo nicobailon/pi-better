@@ -26,18 +26,28 @@ test("the /better widget keeps the same height and fits the width in every frame
 		const widget = new HelperProgress({ requestRender() {} } as any, theme, ["/tmp/pb-rec/pi-better", "/private/tmp/pb-rec/pi-better"], Date.now() - 1_199_000);
 		try {
 			let frame = widget.render(width);
+			const shown = new Set<string>();
 			for (const event of events) {
 				widget.apply(event);
 				frame = widget.render(width);
 				assert.equal(frame.length, 2, `${width} columns, ${event.type}`);
 				for (const line of frame) assert.ok(visibleWidth(line) <= width, `${width} columns: ${plain(line)}`);
+				shown.add(plain(frame[0]).slice(3).replace(/ +19m 59s.*/, ""));
 			}
 			const [steps, tools] = frame.map(plain);
 			assert.match(steps, /19m 59s · \/better-cancel $/);
-			assert.match(steps, /● prompt/);
 			assert.match(tools, /✓ grep index\.ts +4 tools · 1 failed $/);
-			if (width >= 80) {
-				assert.match(steps, /✓ gather ━━━ ✓ answer 4\/4 ━━━ ● prompt/);
+			if (width === 50) {
+				assert.deepEqual([...shown], ["Reading files", "Question 1 of 4", "Question 2 of 4", "Question 3 of 4", "Question 4 of 4", "Writing the prompt"]);
+			} else {
+				assert.deepEqual([...shown], [
+					"Reading your code and files",
+					"Question 1 of 4: what would a pro do here?",
+					"Question 2 of 4: what's the raw material?",
+					"Question 3 of 4: which methods and tools?",
+					"Question 4 of 4: what would prove it right?",
+					"Writing your improved prompt",
+				]);
 				assert.match(tools, /✗ ls -a \.pi\/todos/);
 			}
 		} finally {
