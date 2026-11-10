@@ -2,7 +2,7 @@
 
 Put `/better` in front of a prompt and pi-better rewrites it into the version a top professional would ask for, with facts from your own code and files in it. The new prompt lands in your input box, so you read it before anything runs.
 
-https://github.com/user-attachments/assets/98fcb8d9-d1f6-475a-87c8-8691f22f9c47
+https://github.com/user-attachments/assets/156a370f-66ce-4d8e-b5d2-387abf11ee74
 
 It's built on the "Depth" prompt from Felix Rieseberg's [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth). In his words:
 
