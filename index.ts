@@ -50,7 +50,14 @@ function askHelper(cwd: string, sessionFile: string | undefined, modelArgs: stri
 			timedOut = true;
 			child.kill();
 		}, HELPER_TIMEOUT_MS);
-		const onAbort = () => child.kill();
+		// Clean up now rather than on "close": when Pi quits mid-run, it exits before the child's close event.
+		const onAbort = () => {
+			child.kill();
+			// The helper may still be writing as it exits; if this delete fails, settle() deletes the folder again once it has.
+			try {
+				cleanUp();
+			} catch {}
+		};
 		signal.addEventListener("abort", onAbort, { once: true });
 		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 			const lines = (buffered + chunk).split("\n");
@@ -125,16 +132,14 @@ export class HelperProgress extends Loader {
 	private readonly theme: Theme;
 	private readonly projectDirs: readonly string[];
 	private readonly startedAt: number;
-	private readonly escCancels: () => boolean;
 	private readonly tools: { id: string; label: string; state: "running" | "ok" | "failed" }[] = [];
 	private reply = "";
 
-	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number, escCancels: () => boolean) {
+	constructor(tui: TUI, theme: Theme, projectDirs: readonly string[], startedAt: number) {
 		super(tui, (cell) => cell, (message) => message, "", { frames: ["▰", "▱"], intervalMs: 400 });
 		this.theme = theme;
 		this.projectDirs = projectDirs;
 		this.startedAt = startedAt;
-		this.escCancels = escCancels;
 	}
 
 	apply(event: HelperEvent): void {
@@ -164,7 +169,7 @@ export class HelperProgress extends Loader {
 		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 		// Fixed width, so the clock and the cancel hint never shift.
 		const key = getKeybindings().getKeys("app.interrupt").join("/");
-		const cancel = key && this.escCancels() ? `${key} cancels` : "/better-cancel";
+		const cancel = key ? `${key} cancels` : "/better-cancel";
 		const pad = " ".repeat(Math.max(0, "/better-cancel".length - cancel.length));
 		const right = `${pad}${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", ` · ${cancel}`)} `;
 		const room = width - visibleWidth(right) - 1;
@@ -256,7 +261,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			if (helperRun) {
-				ctx.ui.notify("/better is already running; /better-cancel stops it.", "error");
+				const key = ctx.mode === "tui" && getKeybindings().getKeys("app.interrupt")[0];
+				ctx.ui.notify(`/better is already running; ${key || "/better-cancel"} stops it.`, "error");
 				return;
 			}
 			let modelArgs: string[];
@@ -275,28 +281,36 @@ export default function (pi: ExtensionAPI) {
 			let stopListening: (() => void) | undefined;
 			if (ctx.mode === "tui") {
 				const startedAt = Date.now();
-				// Pi's Esc stops the agent's run, and on a "!" line clears the input box; /better takes Esc only when it
-				// would do neither.
-				const escCancels = () => !run.signal.aborted && ctx.isIdle() && !ctx.ui.getEditorText().trimStart().startsWith("!");
 				// Pi's two screens, which both track focus; the TUI interface widgets get doesn't expose it.
 				let tui: TuiMainScreen | TuiAltScreen | undefined;
 				ctx.ui.setWidget(WIDGET, (ui, theme) => {
 					tui = ui as TuiMainScreen | TuiAltScreen;
-					return (widget = new HelperProgress(ui, theme, projectDirs, startedAt, escCancels));
+					return (widget = new HelperProgress(ui, theme, projectDirs, startedAt));
 				});
-				const cancel = () => run.abort();
+				// The first Esc Pi's input box passes on cancels /better; after that, Esc is Pi's again (stopping the agent,
+				// clearing a "!" line, and so on).
+				let swapped = false;
 				stopListening = ctx.ui.onTerminalInput((data): undefined => {
+					// Kitty terminals also report Esc's release, which Pi drops before the editor. A release, or a second Esc
+					// in the same chunk, arrives before the microtask restore below, so it must not swap again.
+					if (swapped || run.signal.aborted || isKeyRelease(data) || !getKeybindings().matches(data, "app.interrupt")) return;
 					const editor = tui?.getFocusedComponent() as { onEscape?: () => void } | null | undefined;
 					// Pi's editors have actionHandlers; a picker or dialog in focus keeps its own Esc.
-					if (!editor || !("actionHandlers" in editor) || !getKeybindings().matches(data, "app.interrupt") || !escCancels()) return;
-					// Kitty terminals also report Esc's release, which Pi drops before the editor. A release, or a second Esc
-					// in the same chunk, arrives before the restore below; swapping again would save `cancel` as Pi's handler.
-					if (isKeyRelease(data) || editor.onEscape === cancel) return;
+					if (!editor || !("actionHandlers" in editor)) return;
 					// The key still reaches the editor, which keeps Esc for itself when autocomplete or a vim mode needs it.
 					// Only the Esc it passes on to Pi goes to /better, and only for this key press.
+					swapped = true;
 					const piEscape = editor.onEscape;
-					editor.onEscape = cancel;
-					queueMicrotask(() => (editor.onEscape = piEscape));
+					const restore = () => {
+						if (swapped) editor.onEscape = piEscape;
+						swapped = false;
+					};
+					// Restoring right away lets a second Esc in the same chunk reach Pi.
+					editor.onEscape = () => {
+						restore();
+						run.abort();
+					};
+					queueMicrotask(restore);
 				});
 			}
 			const finished = (async () => {

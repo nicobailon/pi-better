@@ -34,7 +34,7 @@ separate `pi -p` process, in the background      this chat answers, as a hidden 
 
 **It can only read.** Narrowing the helper's tool list can change the start of its request (for most models Pi puts tool changes into the opening system prompt), so it keeps every tool and pi-better refuses the calls instead: the helper process runs with `PI_BETTER_HELPER=1`, and pi-better's copy inside it blocks any tool other than `read`, `grep`, `find`, `ls` and the shell (`bash`, or `powershell` where your setup uses it), telling the model which of those it has. Pi turns on only `read` and `bash` of these by default; `grep`, `find` and `ls` are there when your chat has them.
 
-**It gets a copy of your chat, as it was when you ran `/better`.** If the session has been saved (it has once there's a message in it), the helper starts with `--fork` of the session file. The copy goes into a temporary folder that's deleted when the helper finishes, so it never shows up in `/resume`. Messages you send while it works don't reach it. In a new session with nothing saved yet, it starts fresh, so `/better` needs a prompt there.
+**It gets a copy of your chat, as it was when you ran `/better`.** If the session has been saved (it has once there's a message in it), the helper starts with `--fork` of the session file. The copy goes into a temporary folder that's deleted when the helper finishes, or right away when `/better` is cancelled or you quit Pi, so it never shows up in `/resume` or stays on disk. Messages you send while it works don't reach it. In a new session with nothing saved yet, it starts fresh, so `/better` needs a prompt there.
 
 **It runs in the background.** `/better` returns right away and you keep chatting. The two progress rows come from the helper's JSON event stream. Tool start and end events fill the second row: each tool shows as its first real command or its path, inside the project, under `~`, or as a bare file name, with ✓ or ✗, newest last, oldest dropped when the row is full. The reply's text sets the first row, a six-cell meter and what the helper is doing: "Reading your code and files" until the reply starts a line with "(n)", then what it is working out for that question, like "Picking the methods and tools (3 of 4)", then "Writing your improved prompt" once the `<improved-prompt>` line opens. Each step fills one more cell. Both rows stay the same height and are cut to the terminal's width; when the full wording doesn't fit, a short form shows ("Reading files", "Thinking", "Writing prompt"). The meter's timer pulses the current cell and also repaints the clock.
 
@@ -42,9 +42,11 @@ When the helper exits, pi-better takes the text of its last reply, reads the pro
 
 **It works while the agent is busy.** Pi runs a slash command from an extension as soon as you press Enter, even while the agent is writing a reply, running a tool or compacting; a normal message sent then waits in the queue. So `/better` starts its helper right away, and the improved prompt lands in your input box while the agent keeps working. The copy holds every message saved so far. Pi saves a message when it finishes, so a reply still being written isn't in it, and a tool call still running has no result yet; Pi fills in a "No result provided" result when it sends the copy to the model. In a new session, Pi saves the file as soon as your first message starts the turn, so `/better` with no prompt works during that first turn too.
 
-**One at a time.** A second `/better` while one is running is refused. `/better-cancel` stops the helper, and so does starting or switching sessions (`/new`, `/resume`, `/reload`); after a session switch, the stopped run doesn't touch the old session.
+**One at a time.** A second `/better` while one is running is refused. Esc stops the helper, and so does starting or switching sessions (`/new`, `/resume`, `/reload`); after a session switch, the stopped run doesn't touch the old session.
 
-**Esc stops it while the agent is idle.** Pi's own Esc stops the agent's run, and on a `!` line it clears the input box, so `/better` takes Esc only when the agent is idle and the box isn't a `!` line; the widget's hint shows which applies ("escape cancels" or "/better-cancel"). Pi reserves Esc, so an extension can't register it as a shortcut. Instead pi-better watches keys as they come in, and for one Esc it points the input box's app-level Esc handler at `/better`. The input box still gets the key first, so Esc that closes autocomplete, or leaves insert mode in a vim-style editor, does that and nothing else, and a picker or dialog in focus keeps its Esc.
+**The first Esc stops it.** While `/better` runs, the first Esc goes to `/better`, even while the agent is busy, and the next Esc does what it always does in Pi: stops the agent's run or a `!` command, or clears a `!` line. Pi reserves Esc, so an extension can't register it as a shortcut. Instead pi-better watches keys as they come in, and for one Esc it points the input box's app-level Esc handler at `/better`. The input box still gets the key first, so Esc that closes autocomplete, or leaves insert mode in a vim-style editor, does that and nothing else, and a picker or dialog in focus keeps its Esc. Two Esc presses that reach Pi together still split this way: the first stops `/better`, the second the agent.
+
+`/better-cancel` also stops the helper. It's there for RPC mode, which has no Esc key.
 
 ## `/better-boomerang`
 
@@ -65,7 +67,7 @@ Neither command changes earlier history, and your conversation only gains the me
 | Message | What it means |
 |---|---|
 | `/better has no task to deepen yet; give it a prompt: /better <prompt>` | nothing has been saved in this session yet, so there's no task to deepen |
-| `/better is already running; /better-cancel stops it.` | one helper runs at a time |
+| `/better is already running; escape stops it.` | one helper runs at a time (in RPC mode it names `/better-cancel`) |
 | `/better failed: No model is selected; pick one with /model.` | the chat has no model yet, so the helper has none to use |
 | `/better failed: "better" in settings.json must be an object like …` | `better` in `settings.json` isn't `{ "model": …, "thinking": … }` |
 | `/better failed: "better.model" in settings.json must be a string like …` | `better.model` is empty or not a string |
@@ -95,4 +97,3 @@ Neither command changes earlier history, and your conversation only gains the me
 - The refusal comes from pi-better's copy inside the helper, so it needs pi-better installed where Pi finds it on its own (`~/.pi/agent/extensions` or `pi install`). Loaded only with `-e` for one chat, the helper won't have it, and only helper.md keeps it from editing.
 - The helper gets your settings, not the flags the chat was started with. A chat started with `--append-system-prompt`, `-e`, `--no-context-files` or similar flags sends a different opening, so the helper's request misses the cache.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.
-- Pi doesn't tell extensions when a `!` command finishes. If one is running while the agent is idle and `/better` works, the first Esc stops `/better`; press Esc again to stop the command.
