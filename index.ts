@@ -126,12 +126,13 @@ function toolLabel(name: string, args: any, projectDirs: readonly string[]): str
 	return label.replace(/[\s\x00-\x1f\x7f]+/g, " ").trim() || name;
 }
 
-const STEPS = ["gather", "answer", "prompt"];
+// Felix's four questions, as the widget names them while the helper answers each one.
+const QUESTIONS = ["what would a pro do here?", "what's the raw material?", "which methods and tools?", "what would prove it right?"];
 
 /**
- * The /better widget, fed the helper's events: helper.md's three steps and the clock on one row, the helper's
- * tools on the next, newest last. Always two rows, each cut to the terminal width. Loader's timer turns the
- * spinner and repaints, which also moves the clock.
+ * The /better widget, fed the helper's events: what the helper is doing now and the clock on one row, its tools on
+ * the next, newest last. Always two rows, each cut to the terminal width. Loader's timer turns the spinner and
+ * repaints, which also moves the clock.
  */
 export class HelperProgress extends Loader {
 	private readonly theme: Theme;
@@ -163,21 +164,18 @@ export class HelperProgress extends Loader {
 	override render(width: number): string[] {
 		const { theme } = this;
 		const { answered, writingPrompt } = replyProgress(this.reply);
-		const current = writingPrompt ? 2 : answered ? 1 : 0;
-		const step = (i: number) => {
-			const label = i === 1 && answered ? `answer ${answered}/4` : STEPS[i];
-			if (i < current) return `${theme.fg("success", "✓")} ${theme.fg("muted", label)}`;
-			if (i === current) return theme.fg("accent", `● ${label}`);
-			return theme.fg("dim", `○ ${label}`);
-		};
-		const rail = STEPS.map((_, i) => (i ? theme.fg(i <= current ? "muted" : "dim", i <= current ? " ━━━ " : " ─── ") : "") + step(i)).join("");
+		// What the helper is doing, in full and in a short form for narrow terminals.
+		const spinner = ` ${this.getRenderedIndicator()} `;
+		const [full, short] =
+			writingPrompt ? [theme.fg("accent", "Writing your improved prompt"), theme.fg("accent", "Writing the prompt")]
+			: answered ? [theme.fg("accent", `Question ${answered} of 4: `) + theme.fg("muted", QUESTIONS[answered - 1]), theme.fg("accent", `Question ${answered} of 4`)]
+			: [theme.fg("accent", "Reading your code and files"), theme.fg("accent", "Reading files")];
 		const seconds = Math.floor((Date.now() - this.startedAt) / 1000);
 		const clock = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 		// Fixed width, so the clock and the cancel hint never shift.
 		const right = `${theme.fg("muted", clock.padStart(7))}${theme.fg("dim", " · /better-cancel")} `;
-		const head = ` ${this.getRenderedIndicator()} ${theme.fg("accent", "/better")}  `;
 		const room = width - visibleWidth(right) - 1;
-		const left = visibleWidth(head + rail) <= room ? head + rail : head + step(current);
+		const left = visibleWidth(spinner + full) <= room ? spinner + full : truncateToWidth(spinner + short, room, "…");
 		const top = left + " ".repeat(Math.max(1, room + 1 - visibleWidth(left))) + right;
 
 		const failed = this.tools.filter((tool) => tool.state === "failed").length;
