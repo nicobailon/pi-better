@@ -134,7 +134,7 @@ test("Esc cancels /better while the agent is idle, and goes to Pi while the agen
 		let listener: ((data: string) => { consume?: boolean } | undefined) | undefined;
 		// Like Pi's TUI: the input listeners see each key first, then the focused component gets it, minus key releases.
 		const press = (data: string) => {
-			if (!listener?.(data)?.consume && !isKeyRelease(data)) editor.handleInput(data);
+			if (!listener?.(data)?.consume && !isKeyRelease(data)) editor.handleInput();
 		};
 		let shown: { dispose(): void } | undefined;
 		let notified!: (message: string) => void;
