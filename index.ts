@@ -50,7 +50,11 @@ function askHelper(cwd: string, sessionFile: string | undefined, modelArgs: stri
 			timedOut = true;
 			child.kill();
 		}, HELPER_TIMEOUT_MS);
-		const onAbort = () => child.kill();
+		// Clean up now rather than on "close": when Pi quits mid-run, it exits before the child's close event.
+		const onAbort = () => {
+			child.kill();
+			cleanUp();
+		};
 		signal.addEventListener("abort", onAbort, { once: true });
 		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
 			const lines = (buffered + chunk).split("\n");

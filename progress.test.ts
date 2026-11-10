@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,20 +82,24 @@ test("each tool shows as one short line: the real command or path, shortened to 
 	}
 });
 
-// Runs `body` with the helper replaced by fixtures/fake-pi.mjs, which replies once the gate file exists (or after 5 s).
+// Runs `body` with the helper replaced by fixtures/fake-pi.mjs, which replies once the gate file exists (or after 5 s),
+// and with `dir` as the temp folder, where pi-better puts the helper's copy of the session.
 async function withFakeHelper(body: (setup: { dir: string; session: string; gate: string }) => Promise<void>): Promise<void> {
 	const dir = mkdtempSync(join(tmpdir(), "pb-busy-"));
 	const session = join(dir, "session.jsonl");
 	writeFileSync(session, "{}\n");
 	const script = process.argv[1];
+	const temp = process.env.TMPDIR;
 	// pi-better launches the helper from the running Pi's CLI script.
 	process.argv[1] = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 	process.env.PI_BETTER_TEST_GATE = join(dir, "gate");
+	process.env.TMPDIR = dir;
 	try {
 		await body({ dir, session, gate: process.env.PI_BETTER_TEST_GATE });
 	} finally {
 		process.argv[1] = script;
 		delete process.env.PI_BETTER_TEST_GATE;
+		process.env.TMPDIR = temp;
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
@@ -153,11 +157,15 @@ test("the first Esc cancels /better even while the agent is busy, and the next E
 		const ctx = { hasUI: true, mode: "tui", cwd: dir, model: { provider: "p", id: "m" }, thinkingLevel: "low", isIdle: () => false, sessionManager: { getSessionFile: () => session }, ui };
 
 		await commands.better.handler("add a name flag", ctx);
+		const copies = () => readdirSync(dir).filter((name) => name.startsWith("pi-better-"));
+		assert.equal(copies().length, 1, "the helper works on a copy of the session");
 		// Esc pressed twice fast in a Kitty terminal: press, release and press arrive in one chunk.
 		press("\x1b[27u");
 		press("\x1b[27;1:3u");
 		press("\x1b[27u");
 		assert.equal(piEscapes, 1, "the second Esc stops the agent");
+		// When Pi quits mid-run, it exits before the helper does, so the copy can't wait for the helper's exit.
+		assert.deepEqual(copies(), [], "the copy is deleted as soon as /better is cancelled");
 		assert.equal(await notice, "/better cancelled; nothing was sent");
 		assert.deepEqual(entries, []);
 

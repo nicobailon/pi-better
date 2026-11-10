@@ -4,7 +4,7 @@
 
 ### Highlights
 
-- Esc stops `/better` while the agent is idle; the widget's hint says "escape cancels". While the agent is busy, Esc still stops the agent and the hint says `/better-cancel`, which works any time.
+- Esc stops `/better`, even while the agent is busy; press Esc again to stop the agent. The widget's hint says "escape cancels". `/better-cancel` stays for RPC mode, which has no Esc key.
 - The README and how-it-works now say that `/better` works while the agent is busy: mid-reply, while a tool runs, or during compaction. It starts right away, where a normal message would wait in the queue, and the improved prompt lands in your input box while the agent keeps working.
 - `/better`'s helper now runs on the chat's model and thinking level instead of always on Opus 5.5 with high thinking. It also keeps the chat's tools and system prompt, so your conversation comes from the provider's prompt cache: in a test, 36,860 of 38,216 input tokens were cache reads, against 1,651 before. pi-better still holds it to reading by refusing any tool other than `read`, `grep`, `find`, `ls` and the shell. To use another model or thinking level, set `"better": { "model": "…", "thinking": "…" }` in `settings.json`.
 - The helper's prompt now opens by telling it to find and read the code, files, docs and logs the request touches before answering, without asking you anything. Felix's four questions follow word for word.
