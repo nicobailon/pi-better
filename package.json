@@ -6,9 +6,9 @@
   "private": true,
   "license": "MIT",
   "keywords": ["pi-package"],
-  "files": ["index.ts", "better.ts", "helper.md", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["index.ts", "better.ts", "helper.md", "brief.md", "README.md", "CHANGELOG.md", "LICENSE"],
   "scripts": {
-    "test": "node --test better.test.ts progress.test.ts",
+    "test": "node --test better.test.ts progress.test.ts subagent-brief.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "peerDependencies": {

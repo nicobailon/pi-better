@@ -1,6 +1,8 @@
 // Stands in for the helper's `pi --mode json -p …` in tests: holds its reply until the test creates the gate file.
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 
+// Lets a test read the task pi-better gave the helper (the last argument).
+if (process.env.PI_BETTER_TEST_ARGS) writeFileSync(process.env.PI_BETTER_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
 const reply = () => {
 	clearInterval(timer);
 	const text = "(1) a\n(2) b\n(3) c\n(4) d\n\n<improved-prompt>\nAdd --name to run.sh and prove it with ./run.sh --name Ann.\n</improved-prompt>";
