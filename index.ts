@@ -1,14 +1,15 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import type { ExtensionAPI, ExtensionContext, JsonAgentSessionEvent, SessionEntry, SessionHeader, Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, isKeyRelease, Loader, type TUI, type TuiAltScreen, type TuiMainScreen, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { buildHelperTask, HELPER_ENV, helperExitError, helperModelArgs, helperToolBlock, parseMarkedPrompt, replyProgress } from "./better.ts";
+import { BRIEF_MARK, buildBriefTask, buildHelperTask, HELPER_ENV, helperExitError, helperModelArgs, helperToolBlock, parseMarkedPrompt, replyProgress } from "./better.ts";
 
 const HELPER_TIMEOUT_MS = 20 * 60 * 1000;
 const WIDGET = "better";
+const BRIEF_STATUS = "better-briefs";
 const SHUTDOWN = "session shutdown";
 
 class Cancelled extends Error {}
@@ -236,12 +237,51 @@ function handOver(pi: ExtensionAPI, ctx: ExtensionContext, prompt: string, poste
 
 export default function (pi: ExtensionAPI) {
 	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
+	const briefCheck = () => readFileSync(new URL("./brief.md", import.meta.url), "utf8");
 	let helperRun: AbortController | undefined;
+	// Aborted on session_shutdown: Pi exits or loads a fresh copy of this extension after it, and a helper still
+	// checking a brief would outlive the session.
+	const briefRuns = new AbortController();
+	let briefsChecking = 0;
 	let boomerangRunning = false;
 
 	if (process.env[HELPER_ENV]) pi.on("tool_call", (event) => helperToolBlock(event.toolName, pi.getActiveTools()));
+	// A subagent brief that starts with "/better" is checked on a copy of this chat before the subagent starts, the
+	// way /better works on a person's prompt. pi-subagents offers each workflow child (scripts, parallel, tasks and
+	// chain, after {previous} is filled in) as its own subagent_launch call; a single child is the subagent call.
+	// Throwing blocks that start, so a failure or Esc never sends the subagent the unchecked brief.
+	else pi.on("tool_call", async (event, ctx) => {
+		const input = event.input as { agent?: unknown; task?: unknown; cwd?: unknown; action?: unknown; resume?: unknown };
+		const single = event.toolName === "subagent" && typeof input.agent === "string" && input.action === undefined;
+		if (!(single || event.toolName === "subagent_launch") || input.resume !== undefined) return;
+		if (typeof input.task !== "string" || !BRIEF_MARK.test(input.task)) return;
+		const brief = input.task.replace(BRIEF_MARK, "").trim();
+		if (!brief) throw new Error("A /better subagent brief needs the brief after /better.");
+		const signal = ctx.signal ? AbortSignal.any([ctx.signal, briefRuns.signal]) : briefRuns.signal;
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		const fork = sessionFile !== undefined && existsSync(sessionFile) ? sessionFile : undefined;
+		const showCount = () => ctx.ui.setStatus(BRIEF_STATUS, briefsChecking ? `/better is checking ${briefsChecking} subagent brief${briefsChecking === 1 ? "" : "s"}` : undefined);
+		briefsChecking++;
+		showCount();
+		try {
+			const modelArgs = helperModelArgs((pi.getSettings() as { better?: unknown }).better, ctx.model && `${ctx.model.provider}/${ctx.model.id}`, ctx.thinkingLevel);
+			// The helper works where the subagent will, so the paths it checks are the subagent's.
+			const cwd = typeof input.cwd === "string" ? resolve(ctx.cwd, input.cwd) : ctx.cwd;
+			const reply = await askHelper(cwd, fork, modelArgs, buildBriefTask(briefCheck(), brief), signal, () => {});
+			const checked = parseMarkedPrompt(reply);
+			pi.appendEntry("better", { prompt: brief, improved: checked, reply, subagent: true });
+			input.task = checked;
+		} catch (error) {
+			if (error instanceof Cancelled) throw new Error("/better was cancelled, so the subagent didn't start.");
+			throw new Error(`/better couldn't check this subagent brief, so the subagent didn't start: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			briefsChecking--;
+			if (briefRuns.signal.reason !== SHUTDOWN) showCount();
+		}
+	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
+		briefRuns.abort(SHUTDOWN);
 		if (!helperRun) return;
 		// After this the old ctx is stale, so the cancelled run must not touch it (see the SHUTDOWN checks).
 		helperRun.abort(SHUTDOWN);

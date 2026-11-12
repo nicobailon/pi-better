@@ -4,6 +4,7 @@
 
 ### Highlights
 
+- An agent can now use `/better` on a subagent's brief the way you use it on a prompt: a task that starts with `/better` is checked on a copy of the chat before the subagent starts. A subagent sees none of the chat, so the helper reads the brief as the subagent will, fixes paths and names that are wrong, spells out anything only the chat explains, and adds how the subagent will know it's done. It keeps the brief's scope and returns it unchanged when nothing is missing. It works for single subagents and for every child a pi-subagents workflow starts, including chain steps, and needs a pi-subagents version that applies a changed task.
 - Esc stops `/better`, even while the agent is busy; press Esc again to stop the agent. The widget's hint says "escape cancels". `/better-cancel` stays for RPC mode, which has no Esc key.
 - Quitting Pi while `/better` works no longer leaves the helper's copy of your session in the temp folder.
 - The README and how-it-works now say that `/better` works while the agent is busy: mid-reply, while a tool runs, or during compaction. It starts right away, where a normal message would wait in the queue, and the improved prompt lands in your input box while the agent keeps working.

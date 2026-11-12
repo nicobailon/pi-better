@@ -3,12 +3,12 @@ const CLOSE = "</improved-prompt>";
 // The opening tag counts only on a line of its own; the prompt itself may mention the tag inline.
 const OPEN_LINE = `\n${OPEN}\n`;
 
-const RETURN = `## Return
+const returnSection = (last: number, what: string) => `## Return
 
-Give answers (1) to (4) in your reply, each starting a new line with its number, like "(1)". Then end it with the rewritten prompt, complete, between these two lines and nothing after them:
+Give answers (1) to (${last}) in your reply, each starting a new line with its number, like "(1)". Then end it with the ${what}, complete, between these two lines and nothing after them:
 
 ${OPEN}
-the rewritten prompt
+the ${what}
 ${CLOSE}`;
 
 export const HELPER_ENV = "PI_BETTER_HELPER";
@@ -46,7 +46,19 @@ export function buildHelperTask(helper: string, prompt: string): string {
 	return [
 		helper.trim(),
 		`## Prompt to deepen\n\n${prompt || "None given: deepen the task in progress in the conversation so far, including any feedback I gave on work already done."}`,
-		RETURN,
+		returnSection(4, "rewritten prompt"),
+	].join("\n\n");
+}
+
+// A subagent brief marked "/better" gets brief.md's check instead of Depth: an agent's brief is long and its scope
+// is decided, so what it lacks is what the subagent can't see, not depth.
+export const BRIEF_MARK = /^\/better(?=\s|$)/;
+
+export function buildBriefTask(check: string, brief: string): string {
+	return [
+		check.trim(),
+		`## Brief to check\n\n${brief}`,
+		returnSection(3, "brief"),
 	].join("\n\n");
 }
 

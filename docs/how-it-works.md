@@ -54,6 +54,12 @@ The agent in this chat answers the same task, as a hidden message that starts a 
 
 If the chat's last entry is a message (yours or one an extension added), pi-better first adds an invisible marker entry to jump back to, because jumping to a message would put its text back into your input box.
 
+## Subagent briefs
+
+An agent can use `/better` the way you do: it starts a [pi-subagents](https://github.com/nicobailon/pi-subagents) task with `/better`, and the subagent gets the checked brief. pi-better doesn't tell the agent about this, so its prompt cache stays the same; say it where your agent reads instructions, such as AGENTS.md or a skill. pi-better watches each single `subagent` call and each `subagent_launch` call, which pi-subagents makes for every child a workflow starts (workflow scripts, `parallel`, `tasks` and `chain`, with `{previous}` already filled in). It needs a pi-subagents version that applies a changed `task`; older ones start the child with the literal `/better …` text.
+
+A brief gets a different prompt from yours, [brief.md](../brief.md). An agent's brief is usually long and its scope is decided, so instead of deepening it, the same kind of helper reads it as the subagent will, with none of the chat. It lists what the subagent can't resolve on its own, checks every path, name and command against the repo, finds how the subagent will know it's done, and fixes only those gaps. A brief that needs nothing comes back unchanged. The helper runs in the subagent's folder, and the status bar counts the briefs being checked. Esc, an error or the 20-minute limit stops that subagent from starting.
+
 ## Outside the interactive terminal
 
 Print and JSON mode have no input box, and in RPC mode pi-better can't read what's already in the box, so a draft would be lost. In those modes `/better` posts the helper's whole reply as a message and `/better-boomerang` posts the prompt. In print and JSON mode `/better` waits for the helper before the command returns, since Pi would exit otherwise.
@@ -87,6 +93,9 @@ Neither command changes earlier history, and your conversation only gains the me
 | `/better-boomerang has no task to deepen yet; give it a prompt: /better-boomerang <prompt>` | this chat has no entries yet, so there's no task to deepen |
 | `/better-boomerang failed: another extension cancelled the jump back to where the rewrite started` | another extension blocked the tree navigation; the rewrite is still in the chat |
 | `/better-boomerang failed: the rewrite's branch point is gone from the session` | the chat moved off the rewrite's branch during the turn; the rewrite is still in the session |
+| `/better was cancelled, so the subagent didn't start.` | Esc or quitting stopped a brief check; for a workflow child it follows `Workflow child '<key>' was not started: …` |
+| `/better couldn't check this subagent brief, so the subagent didn't start: …` | the helper failed on a brief; the text after it is one of the `/better failed:` reasons above |
+| `A /better subagent brief needs the brief after /better.` | the task was `/better` with nothing after it |
 
 `/better` also saves that reply as a `better` session entry. `/better-boomerang` reports a missing or empty block without the file part, and leaves the rewrite in the chat so you can see what happened.
 
@@ -97,3 +106,5 @@ Neither command changes earlier history, and your conversation only gains the me
 - The refusal comes from pi-better's copy inside the helper, so it needs pi-better installed where Pi finds it on its own (`~/.pi/agent/extensions` or `pi install`). Loaded only with `-e` for one chat, the helper won't have it, and only helper.md keeps it from editing.
 - The helper gets your settings, not the flags the chat was started with. A chat started with `--append-system-prompt`, `-e`, `--no-context-files` or similar flags sends a different opening, so the helper's request misses the cache.
 - The helper loads your usual extensions, so any extension that does something at session start does it once per helper too.
+- A workflow that starts several `/better` subagents at once runs one helper per brief, each with its own copy of the chat. A workflow's own stop or time limit doesn't stop a helper that's already checking a brief; only Esc on the turn, or quitting, does. The subagent still never starts. The check's time counts against the workflow's time limit.
+- Some starts get the literal `/better …` text, because pi-subagents doesn't offer them to other extensions: workflows started inside a subagent, chats whose `--tools` list leaves `subagent_launch` out, schedule ticks, auto-resume, RPC starts and prompt-template delegation. A background subagent that itself calls `subagent` with a `/better` task fails to start, because the helper can't be launched from pi-subagents' background runner. Extensions that approve subagent starts and load before pi-better see the brief before it's checked.
