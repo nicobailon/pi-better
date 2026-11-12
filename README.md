@@ -138,6 +138,6 @@ Anything you'd typed meanwhile stays in the box, below the prompt, and the notic
 | Deepen the task you're working on now, including your feedback so far | `/better` with no prompt |
 | Stop the helper | Esc (press it again to stop the agent) |
 | Watch the rewrite happen in the chat | `/better-boomerang <prompt>` (or no prompt, for the task in progress) |
-| Have a subagent's brief checked against the repo before it starts, for anything the subagent can't see | the agent starts the subagent's task with `/better` ([how](docs/how-it-works.md#subagent-briefs)) |
+| Have a subagent's brief checked against the repo before it starts, for anything the subagent can't see | tell your agent (in AGENTS.md or a skill) to start the subagent's task with `/better` ([how](docs/how-it-works.md#subagent-briefs)) |
 
 [How it works](docs/how-it-works.md) covers the helper process, the copy of your chat, print and RPC mode, the prompt cache, every error message and the limitations.

@@ -239,8 +239,9 @@ export default function (pi: ExtensionAPI) {
 	const helper = () => readFileSync(new URL("./helper.md", import.meta.url), "utf8");
 	const briefCheck = () => readFileSync(new URL("./brief.md", import.meta.url), "utf8");
 	let helperRun: AbortController | undefined;
-	// Aborted on session_shutdown: Pi exits soon after, and a helper still checking a brief would outlive it.
-	let briefRuns = new AbortController();
+	// Aborted on session_shutdown: Pi exits or loads a fresh copy of this extension after it, and a helper still
+	// checking a brief would outlive the session.
+	const briefRuns = new AbortController();
 	let briefsChecking = 0;
 	let boomerangRunning = false;
 
@@ -256,15 +257,14 @@ export default function (pi: ExtensionAPI) {
 		if (typeof input.task !== "string" || !BRIEF_MARK.test(input.task)) return;
 		const brief = input.task.replace(BRIEF_MARK, "").trim();
 		if (!brief) throw new Error("A /better subagent brief needs the brief after /better.");
-		const runs = briefRuns;
-		const signal = ctx.signal ? AbortSignal.any([ctx.signal, runs.signal]) : runs.signal;
+		const signal = ctx.signal ? AbortSignal.any([ctx.signal, briefRuns.signal]) : briefRuns.signal;
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		const fork = sessionFile !== undefined && existsSync(sessionFile) ? sessionFile : undefined;
-		const modelArgs = helperModelArgs((pi.getSettings() as { better?: unknown }).better, ctx.model && `${ctx.model.provider}/${ctx.model.id}`, ctx.thinkingLevel);
 		const showCount = () => ctx.ui.setStatus(BRIEF_STATUS, briefsChecking ? `/better is checking ${briefsChecking} subagent brief${briefsChecking === 1 ? "" : "s"}` : undefined);
 		briefsChecking++;
 		showCount();
 		try {
+			const modelArgs = helperModelArgs((pi.getSettings() as { better?: unknown }).better, ctx.model && `${ctx.model.provider}/${ctx.model.id}`, ctx.thinkingLevel);
 			// The helper works where the subagent will, so the paths it checks are the subagent's.
 			const cwd = typeof input.cwd === "string" ? resolve(ctx.cwd, input.cwd) : ctx.cwd;
 			const reply = await askHelper(cwd, fork, modelArgs, buildBriefTask(briefCheck(), brief), signal, () => {});
@@ -276,14 +276,12 @@ export default function (pi: ExtensionAPI) {
 			throw new Error(`/better couldn't check this subagent brief, so the subagent didn't start: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
 			briefsChecking--;
-			if (runs.signal.reason !== SHUTDOWN) showCount();
+			if (briefRuns.signal.reason !== SHUTDOWN) showCount();
 		}
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		briefRuns.abort(SHUTDOWN);
-		briefRuns = new AbortController();
-		briefsChecking = 0;
 		if (!helperRun) return;
 		// After this the old ctx is stale, so the cancelled run must not touch it (see the SHUTDOWN checks).
 		helperRun.abort(SHUTDOWN);
