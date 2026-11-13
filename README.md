@@ -2,7 +2,7 @@
 
 Put `/better` in front of a prompt and pi-better rewrites it into the version a top professional would ask for, with facts from your own code and files in it. The new prompt lands in your input box, so you read it before anything runs.
 
-https://github.com/user-attachments/assets/6feaefcf-d457-46de-bc2e-a7c7b16c5785
+https://github.com/user-attachments/assets/3479699e-8ee3-4fd9-b850-d496f80f5a63
 
 It's built on the "Depth" prompt from Felix Rieseberg's [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth). In his words:
 
@@ -138,6 +138,6 @@ Anything you'd typed meanwhile stays in the box, below the prompt, and the notic
 | Deepen the task you're working on now, including your feedback so far | `/better` with no prompt |
 | Stop the helper | Esc (press it again to stop the agent) |
 | Watch the rewrite happen in the chat | `/better-boomerang <prompt>` (or no prompt, for the task in progress) |
-| Have a subagent's brief checked against the repo before it starts, for anything the subagent can't see | tell your agent (in AGENTS.md or a skill) to start the subagent's task with `/better` ([how](docs/how-it-works.md#subagent-briefs)) |
+| Have a subagent's brief checked against the repo before it starts, for anything the subagent can't see | with [pi-subagents](https://github.com/nicobailon/pi-subagents), tell your agent (in AGENTS.md or a skill) to start the subagent's task with `/better` ([how](docs/how-it-works.md#subagent-briefs)) |
 
 [How it works](docs/how-it-works.md) covers the helper process, the copy of your chat, print and RPC mode, the prompt cache, every error message and the limitations.
