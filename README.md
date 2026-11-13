@@ -2,6 +2,8 @@
 
 Put `/better` in front of a prompt and pi-better rewrites it into the version a top professional would ask for, with facts from your own code and files in it. The new prompt lands in your input box, so you read it before anything runs.
 
+Your agent can use it too when it hands work to another agent. With [pi-subagents](https://github.com/nicobailon/pi-subagents), it starts a subagent's task with `/better`, and the subagent gets a brief that was checked against your repo first.
+
 https://github.com/user-attachments/assets/3479699e-8ee3-4fd9-b850-d496f80f5a63
 
 It's built on the "Depth" prompt from Felix Rieseberg's [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth). In his words:
@@ -88,6 +90,7 @@ It listed every error path with its line number, said to cause each failure for 
 | Your context afterwards | holds the four answers, the research and the rewrite | unchanged | rewinds to where it was before you ran it; the rewrite stays in `/tree` |
 | Model | this chat's | this chat's, reusing its prompt cache, or one you set | this chat's |
 | The improved prompt | in a reply, for you to copy | in your input box | in your input box |
+| Your agent can use it on a subagent's brief | no | yes, with [pi-subagents](https://github.com/nicobailon/pi-subagents); the subagent starts with the checked brief | no |
 
 Use `/better-boomerang` when you want to watch the agent research and write the prompt live, then have the chat rewind as if it never happened.
 
