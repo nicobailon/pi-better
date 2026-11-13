@@ -97,10 +97,10 @@ Use `/better-boomerang` when you want to watch the agent research and write the 
 ## Install
 
 ```bash
-git clone https://github.com/nicobailon/pi-better ~/.pi/agent/extensions/pi-better
+pi install npm:pi-better
 ```
 
-Pi loads extensions from `~/.pi/agent/extensions` on its own, so run `/reload` (or restart Pi) and the commands are there. To keep the folder somewhere else, run `pi install <path>` on it instead.
+Then run `/reload` (or restart Pi) and the commands are there. To work on pi-better itself, clone it into `~/.pi/agent/extensions/pi-better` instead; Pi loads extensions from that folder on its own.
 
 `/better`'s helper runs on the chat's model and thinking level, with the chat's tools and system prompt, so its copy of your conversation is read from the provider's prompt cache instead of being processed again. To use a different model or thinking level for it, add either key to `settings.json` (`~/.pi/agent/settings.json` or the project's `.pi/settings.json`); the cache won't carry over then:
 

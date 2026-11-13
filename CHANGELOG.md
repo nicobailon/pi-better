@@ -2,25 +2,40 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
 ### Highlights
 
-- An agent can now use `/better` on a subagent's brief the way you use it on a prompt: a task that starts with `/better` is checked on a copy of the chat before the subagent starts. A subagent sees none of the chat, so the helper reads the brief as the subagent will, fixes paths and names that are wrong, spells out anything only the chat explains, and adds how the subagent will know it's done. It keeps the brief's scope and returns it unchanged when nothing is missing. It works for single subagents and for every child a pi-subagents workflow starts, including chain steps, and needs a pi-subagents version that applies a changed task.
-- Esc stops `/better`, even while the agent is busy; press Esc again to stop the agent. The widget's hint says "escape cancels". `/better-cancel` stays for RPC mode, which has no Esc key.
-- Quitting Pi while `/better` works no longer leaves the helper's copy of your session in the temp folder.
-- The README and how-it-works now say that `/better` works while the agent is busy: mid-reply, while a tool runs, or during compaction. It starts right away, where a normal message would wait in the queue, and the improved prompt lands in your input box while the agent keeps working.
-- `/better`'s helper now runs on the chat's model and thinking level instead of always on Opus 5.5 with high thinking. It also keeps the chat's tools and system prompt, so your conversation comes from the provider's prompt cache: in a test, 36,860 of 38,216 input tokens were cache reads, against 1,651 before. pi-better still holds it to reading by refusing any tool other than `read`, `grep`, `find`, `ls` and the shell. To use another model or thinking level, set `"better": { "model": "…", "thinking": "…" }` in `settings.json`.
-- The helper's prompt now opens by telling it to find and read the code, files, docs and logs the request touches before answering, without asking you anything. Felix's four questions follow word for word.
-- While `/better` works, two rows above your input box show a six-cell meter that fills as the helper reads your files, works through the four questions and writes your prompt. Next to it is what the helper is doing, like "Picking the methods and tools (3 of 4)", and below are its latest tools with ✓ or ✗. The rows keep their height and fit the terminal's width, and the time and the cancel hint stay in place.
-- The README now opens with Felix Rieseberg's "Depth" prompt from [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth), the method every rewrite follows, and credits him. It also shows a real before-and-after, compares the three ways to run the prompt, and has a one-minute video of `/better` and `/better-boomerang`.
-- `/better <prompt>` now puts the improved prompt in your input box, so you read it and press Enter yourself. The box with fire, /boomerang, tweak, edit, why and cancel is gone, so pi-boomerang is no longer used; edit the prompt in your input box instead.
-- An improved prompt that mentions the `<improved-prompt>` tag itself now lands in your input box whole, instead of only the part after that mention.
-- When the helper's reply has no improved prompt in it, `/better` keeps the reply in a file and tells you where, so you can see what it wrote. A helper that's killed or exits without an error message now says so plainly, instead of "exited with code null:" or a message ending in a colon.
-- New `/better-boomerang <prompt>`: the agent in this chat rewrites the prompt with everything it already knows, then the chat jumps back to where it started and the improved prompt lands in your input box. The rewrite stays in `/tree`, and no other extension is needed.
-- Anything you'd already typed in the input box stays there, below the improved prompt.
-- `/better` works in the background: you keep chatting with the agent while the helper reads and rewrites, and the improved prompt lands in your input box when it's ready. Esc stops it. The helper is also told to keep its searches small and give slow commands a timeout.
-- `/better` no longer needs pi-subagents: the helper runs as a separate read-only `pi` process.
+- `/better` puts the improved prompt in your input box, so you read and edit it before you press Enter.
+- `/better` works in the background. You keep chatting while the helper reads your code, even while the agent is busy, and Esc stops it.
+- Your agent can use `/better` too: with pi-subagents, a subagent's brief is checked against your repo before the subagent starts.
+- New `/better-boomerang` does the rewrite live in your chat, then rewinds the chat so the research doesn't use up your context.
+- Install it from npm with `pi install npm:pi-better`.
+
+### Added
+
+- An agent can use `/better` on a subagent's brief the way you use it on a prompt. With pi-subagents, a task that starts with `/better` is checked on a copy of the chat before the subagent starts. The subagent sees none of the chat, so the helper reads the brief as the subagent will, fixes paths and names that are wrong, spells out anything only the chat explains, and adds how the subagent will know it's done. It keeps the brief's scope and leaves it unchanged when nothing is missing. This works today for single subagents. For workflow children, including chain steps, it needs the next pi-subagents release after 0.88.0.
+- `/better-boomerang <prompt>`: the agent in this chat rewrites the prompt with everything it already knows, then the chat jumps back to where it started and the improved prompt lands in your input box. The rewrite stays in `/tree`, and no other extension is needed.
+- While `/better` works, two rows above your input box show a meter that fills as the helper reads your files, works through the four questions and writes your prompt, plus what it's doing now, like "Picking the methods and tools (3 of 4)", and its latest tools with ✓ or ✗.
+- Esc stops `/better`, even while the agent is busy; press Esc again to stop the agent. `/better-cancel` does the same in RPC mode, which has no Esc key.
+- To run the helper on a different model or thinking level, set `"better": { "model": "…", "thinking": "…" }` in `settings.json`.
 - Typing a space after either command shows what its argument is for.
-- pi-better lives in `~/.pi/agent/extensions/pi-better` and Pi loads it from there automatically, with no `pi install`.
+
+### Changed
+
+- `/better <prompt>` now puts the improved prompt in your input box instead of a box with fire, /boomerang, tweak, edit, why and cancel, so pi-boomerang is no longer needed. Anything you'd already typed stays in the box, below the improved prompt.
+- `/better` starts right away even while the agent is replying, running a tool or compacting, where a normal message would wait in the queue.
+- The helper is now a separate read-only `pi` process, so `/better` itself no longer needs pi-subagents. It can only read files and run shell commands.
+- The helper runs on the chat's model and thinking level instead of always on Opus 5.5 with high thinking, and it reuses the chat's prompt cache, so reading your conversation costs far fewer input tokens.
+- The helper is told to find and read the code, files, docs and logs your request touches before answering, without asking you anything, and to keep its searches small. Felix Rieseberg's four questions follow word for word.
+- The README opens with Felix Rieseberg's "Depth" prompt from [How to be more ambitious: A tutorial for humans with models](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/#depth) and credits him. It also shows a real before-and-after, compares the three ways to run the prompt, and has a short video.
+- Install with `pi install npm:pi-better`.
+
+### Fixed
+
+- An improved prompt that mentions the `<improved-prompt>` tag itself now lands in your input box whole, instead of only the part after that mention.
+- When the helper's reply has no improved prompt in it, `/better` keeps the reply in a file and tells you where. A helper that's killed or exits without an error message now says so plainly, instead of "exited with code null:".
+- Quitting Pi while `/better` works no longer leaves a copy of your session in the temp folder.
 
 ## [0.1.0] - 2026-11-08
 

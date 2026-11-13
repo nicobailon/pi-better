@@ -1,12 +1,23 @@
 {
   "name": "pi-better",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "/better rewrites your prompt with Felix Rieseberg's \"Depth\" prompt, using your real code and files, and puts it in your input box",
   "type": "module",
-  "private": true,
   "license": "MIT",
-  "keywords": ["pi-package"],
-  "files": ["index.ts", "better.ts", "helper.md", "brief.md", "README.md", "CHANGELOG.md", "LICENSE"],
+  "repository": { "type": "git", "url": "git+https://github.com/nicobailon/pi-better.git" },
+  "homepage": "https://github.com/nicobailon/pi-better#readme",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "index.ts",
+    "better.ts",
+    "helper.md",
+    "brief.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node --test better.test.ts progress.test.ts subagent-brief.test.ts",
     "typecheck": "tsc -p tsconfig.json"
@@ -16,6 +27,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   }
 }
